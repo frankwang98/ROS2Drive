@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<library path="sdc_hud_panel">
+  <class name="sdc/HudPanel"
+         type="sdc::HudPanel"
+         base_class_type="rviz_common::Panel">
+    <description>
+      Autonomous driving HUD panel: shows speed / behavior / front distance,
+      and provides pause/resume and clear-trail controls.
+    </description>
+  </class>
+</library>

@@ -16,10 +16,13 @@
             . /opt/ros/humble/setup.sh
             . install/setup.sh
             # 启动仿真节点，验证节点/话题/可执行文件就绪
-            timeout 6 ./install/self_driving_car_demo/lib/self_driving_car_demo/ring_road_sim &
+            timeout 8 ./install/self_driving_car_demo/lib/self_driving_car_demo/ring_road_sim &
             sleep 3
             ros2 node list | grep -q ring_road_sim
             ros2 topic list | grep -q /simulation/markers
+            ros2 topic list | grep -q /simulation/markers_live
+            ros2 topic list | grep -q /sensor/lidar
+            ros2 topic list | grep -q /sdc/speed
             echo "smoke test passed"
   pull_request:
     - name: ros2-build
