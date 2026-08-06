@@ -17,3 +17,7 @@ demo_car
 
 # OS
 .DS_Store
+
+# ROS2
+install/
+log/
