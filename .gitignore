@@ -1,0 +1,19 @@
+# Build artifacts
+build/
+cmake-build-*/
+
+# Compiled objects / binaries
+*.o
+*.obj
+*.exe
+*.out
+demo_car
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
