@@ -24,6 +24,7 @@ add_library(sdc_core STATIC
   src/sensor/distance_sensor.cpp
   src/decision/decision_maker.cpp
   src/control/motor_controller.cpp
+  src/car/car.cpp
 )
 target_include_directories(sdc_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -34,6 +35,7 @@ add_executable(demo_car
   src/main.cpp
   src/car/car.cpp
 )
+target_link_libraries(demo_car sdc_core)
 target_include_directories(demo_car PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )

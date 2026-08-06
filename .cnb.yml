@@ -1,0 +1,32 @@
+# CNB 流水线：ROS2 C++ 工程编译验证
+# 镜像 ros:humble 基于 Ubuntu 22.04 + ROS2 Humble
+
+"$":
+  push:
+    - name: ros2-build
+      docker:
+        image: ros:humble
+      stages:
+        - name: build
+          script: |
+            . /opt/ros/humble/setup.sh
+            colcon build --packages-select self_driving_car_demo
+        - name: smoke-test
+          script: |
+            . /opt/ros/humble/setup.sh
+            . install/setup.sh
+            # 启动仿真节点，验证节点/话题/可执行文件就绪
+            timeout 6 ./install/self_driving_car_demo/lib/self_driving_car_demo/ring_road_sim &
+            sleep 3
+            ros2 node list | grep -q ring_road_sim
+            ros2 topic list | grep -q /simulation/markers
+            echo "smoke test passed"
+  pull_request:
+    - name: ros2-build
+      docker:
+        image: ros:humble
+      stages:
+        - name: build
+          script: |
+            . /opt/ros/humble/setup.sh
+            colcon build --packages-select self_driving_car_demo

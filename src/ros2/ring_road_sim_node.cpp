@@ -47,9 +47,10 @@ public:
       , angle_(0.0)
       , sim_time_(0.0)
   {
-    // 发布器
+    // 发布器（transient local：后启动的 RViz2 也能收到静态道路）
+    auto qos = rclcpp::QoS(10).transient_local();
     marker_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>(
-        "simulation/markers", 10);
+        "simulation/markers", qos);
 
     // TF 广播
     tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
@@ -59,7 +60,8 @@ public:
         std::chrono::duration<double>(SIM_DT),
         std::bind(&RingRoadSimNode::simulation_step, this));
 
-    // 一次性绘制静态道路
+    // 一次性绘制静态道路并缓存
+    road_markers_ = build_road_markers();
     publish_road_markers();
 
     RCLCPP_INFO(get_logger(),
@@ -91,6 +93,13 @@ private:
     publish_car_marker();
     publish_car_tf();
 
+    //  6. 周期性重发静态道路（每 2 秒），保证后启动的 RViz2 能看到道路
+    road_resend_accum_ += SIM_DT;
+    if (road_resend_accum_ >= 2.0) {
+      road_resend_accum_ = 0.0;
+      publish_road_markers();
+    }
+
     //  6. 日志（每 200 步打印一次，约 10 秒）
     if (static_cast<int>(sim_time_ * 10) % 10 == 0 &&
         static_cast<int>(sim_time_ * 100) % 100 == 0) {
@@ -114,9 +123,9 @@ private:
   }
 
   // ========== 环形道路可视化 ==========
-  void publish_road_markers() {
+  // 构建静态道路 MarkerArray（缓存在 road_markers_）
+  visualization_msgs::msg::MarkerArray build_road_markers() {
     visualization_msgs::msg::MarkerArray ma;
-
     // --- 路面（灰色半透明圆环） ---
     {
       visualization_msgs::msg::Marker m;
@@ -213,7 +222,16 @@ private:
       ma.markers.push_back(m);
     }
 
-    marker_pub_->publish(ma);
+    return ma;
+  }
+
+  // 发布静态道路
+  void publish_road_markers() {
+    // 刷新每个 marker 的时间戳
+    for (auto& mk : road_markers_.markers) {
+      mk.header.stamp = now();
+    }
+    marker_pub_->publish(road_markers_);
   }
 
   // ========== 小车可视化 ==========
@@ -302,6 +320,9 @@ private:
   sdc::Car car_;
   double   angle_;     // 小车在环道上的角度（弧度）
   double   sim_time_;  // 仿真累计时间
+  double   road_resend_accum_{0.0};  // 静态道路重发计时
+
+  visualization_msgs::msg::MarkerArray road_markers_;  // 缓存的静态道路
 
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
   rclcpp::TimerBase::SharedPtr                                        timer_;
