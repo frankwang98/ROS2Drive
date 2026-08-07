@@ -26,7 +26,7 @@ Visualization Manager:
       Topic:
         Value: /simulation/markers
         Depth: 5
-        Reliability: Reliable
+        Reliability Policy: Reliable
         Durability Policy: Transient Local
         History Policy: Keep Last
 
@@ -37,7 +37,7 @@ Visualization Manager:
       Topic:
         Value: /simulation/markers_live
         Depth: 5
-        Reliability: Reliable
+        Reliability Policy: Reliable
         Durability Policy: Volatile
         History Policy: Keep Last
 
@@ -48,7 +48,7 @@ Visualization Manager:
       Topic:
         Value: /sensor/lidar
         Depth: 5
-        Reliability: Reliable
+        Reliability Policy: Reliable
         Durability Policy: Volatile
         History Policy: Keep Last
       Style: Points
