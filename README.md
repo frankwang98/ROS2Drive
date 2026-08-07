@@ -80,16 +80,14 @@ source install/setup.bash
 ros2 launch self_driving_car_demo ring_road.launch.py
 ```
 
-启动后即可在 RViz2 中看到：
-- 灰色环形双车道 + 白色标线（**打开即可见**，无需手动订阅）
-- 蓝色小车沿环道行驶
-- 速度矢量箭头（颜色随行为变化：绿=加速 / 蓝=巡航 / 橙=减速 / 红=停车）
+启动后即可在 RViz2 中看到（`ring_road.rviz` 已默认加载以下话题与面板，**无需手动订阅**）：
+- 灰色环形双车道 + 白色标线（`/simulation/markers`，Transient Local，打开即可见）
+- 蓝色小车沿环道行驶 + 速度矢量箭头（颜色随行为变化：绿=加速 / 蓝=巡航 / 橙=减速 / 红=停车）
+- 绿色规划路径 + 青色行驶轨迹 + 车顶 3D 状态文本（`/simulation/markers_live`）
 - 360° LIDAR 点云（黄色，`/sensor/lidar`）
-- 绿色规划路径 + 青色行驶轨迹
-- 车顶 3D 状态文本（速度/行为/前方距离）
-- **SDC HUD 面板**（右侧）：实时显示小车状态，支持暂停/继续、清除轨迹
+- **SDC HUD 面板**（右侧，`sdc/HudPanel`）：实时显示小车状态，支持暂停/继续、清除轨迹
 
-> 如果已有 RViz2 窗口，可手动订阅话题：
+> 如果使用自定义 RViz 窗口，可手动添加以上话题与面板：
 > - `/simulation/markers`（道路，MarkerArray）
 > - `/simulation/markers_live`（小车/路径/轨迹/文本）
 > - `/sensor/lidar`（LIDAR 点云）
