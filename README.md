@@ -14,6 +14,16 @@
   - 小车沿环道行驶，动态障碍物驱动感知→决策→控制闭环
   - 车体 + 速度矢量箭头（颜色随加速/巡航/减速/停车变化）
   - TF 广播 `world → car_base_link`
+- **自动驾驶常用可视化控件**（仿真节点内置）：
+  - LIDAR 点云（360° 扫描，`/sensor/lidar`，PointCloud2）
+  - 规划路径（绿色曲线沿环道中心前伸）
+  - 行驶轨迹（青色历史轨迹，可清除）
+  - 状态 3D 文本（速度 / 行为 / 前方距离，悬于车顶）
+  - HUD 控制话题：`/sdc/speed`、`/sdc/action_id`、`/sdc/front_distance`、`/sdc/pause`、`/sdc/clear_trail`
+- **RViz 自定义 HUD 面板插件** (`sdc/HudPanel`)：
+  - 实时显示速度 / 行为 / 前方距离
+  - 暂停 / 继续仿真、清除轨迹按钮
+  - 随 `ring_road.rviz` 默认加载
 - **小车控制器节点** (`car_controller`)：独立 ROS2 节点，订阅距离话题 → 决策 → 控制 → 发布速度
 
 ## 目录结构
@@ -34,12 +44,15 @@
 │   ├── decision/decision_maker.cpp
 │   ├── control/motor_controller.cpp
 │   └── ros2/
-│       ├── ring_road_sim_node.cpp    # 环形道路仿真 + RViz2 可视化
+│       ├── ring_road_sim_node.cpp    # 环形道路仿真 + 可视化 + LIDAR/HUD
 │       └── car_controller_node.cpp   # 小车控制器节点
+└── src/rviz/
+    ├── sdc_hud_panel.hpp / .cpp      # RViz 自定义 HUD 控制面板（可选编译）
+    └── plugin_description.xml        # pluginlib 插件描述
 ├── launch/
 │   └── ring_road.launch.py     # 启动仿真 + RViz2
 └── rviz/
-    └── ring_road.rviz          # RViz2 配置（俯视视角）
+    └── ring_road.rviz          # RViz2 配置（俯视视角 + HUD 面板）
 ```
 
 ## 环境要求
@@ -47,6 +60,7 @@
 - Ubuntu 22.04 / 24.04
 - ROS2 Humble
 - 构建工具：`colcon`、`ament_cmake`
+- （可选，RViz HUD 面板需要）`rviz2` 及 Qt5 Widgets
 
 ```bash
 sudo apt install -y ros-humble-desktop   # 包含 rviz2、rviz 插件等
@@ -67,11 +81,19 @@ ros2 launch self_driving_car_demo ring_road.launch.py
 ```
 
 启动后即可在 RViz2 中看到：
-- 灰色环形双车道 + 白色标线
+- 灰色环形双车道 + 白色标线（**打开即可见**，无需手动订阅）
 - 蓝色小车沿环道行驶
 - 速度矢量箭头（颜色随行为变化：绿=加速 / 蓝=巡航 / 橙=减速 / 红=停车）
+- 360° LIDAR 点云（黄色，`/sensor/lidar`）
+- 绿色规划路径 + 青色行驶轨迹
+- 车顶 3D 状态文本（速度/行为/前方距离）
+- **SDC HUD 面板**（右侧）：实时显示小车状态，支持暂停/继续、清除轨迹
 
-> 如果已有 RViz2 窗口，可手动订阅话题 `/simulation/markers`（MarkerArray）。
+> 如果已有 RViz2 窗口，可手动订阅话题：
+> - `/simulation/markers`（道路，MarkerArray）
+> - `/simulation/markers_live`（小车/路径/轨迹/文本）
+> - `/sensor/lidar`（LIDAR 点云）
+> - 面板：`Panels → Add → New panel → sdc/HudPanel`
 
 ## 独立运行旧版单机 demo（不依赖 ROS2）
 

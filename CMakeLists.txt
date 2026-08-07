@@ -9,8 +9,21 @@ find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
+
+# RViz 自定义面板插件（可选依赖）
+# 基础环境缺少 rviz_common / Qt5 时自动跳过，不影响核心仿真构建
+find_package(rviz_common QUIET)
+find_package(Qt5 QUIET COMPONENTS Widgets)
+if(rviz_common_FOUND AND Qt5Widgets_FOUND)
+  set(SDC_BUILD_RVIZ_PANEL ON)
+  message(STATUS "RViz HUD panel plugin: ENABLED")
+else()
+  set(SDC_BUILD_RVIZ_PANEL OFF)
+  message(STATUS "RViz HUD panel plugin: DISABLED (rviz_common/Qt5 not found)")
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -49,6 +62,7 @@ ament_target_dependencies(ring_road_sim
   std_msgs
   visualization_msgs
   geometry_msgs
+  sensor_msgs
   tf2
   tf2_ros
 )
@@ -71,6 +85,41 @@ target_link_libraries(car_controller sdc_core)
 target_include_directories(car_controller PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+# ---- RViz 自定义 HUD 面板插件（可选）----
+if(SDC_BUILD_RVIZ_PANEL)
+  find_package(pluginlib REQUIRED)
+  qt5_wrap_cpp(sdc_hud_panel_MOC
+    src/rviz/sdc_hud_panel.hpp
+  )
+  add_library(sdc_hud_panel SHARED
+    src/rviz/sdc_hud_panel.cpp
+    ${sdc_hud_panel_MOC}
+  )
+  target_link_libraries(sdc_hud_panel
+    Qt5::Widgets
+  )
+  ament_target_dependencies(sdc_hud_panel
+    rclcpp
+    std_msgs
+    rviz_common
+  )
+  target_compile_definitions(sdc_hud_panel PRIVATE QT_NO_KEYWORDS)
+  target_include_directories(sdc_hud_panel PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+  install(TARGETS sdc_hud_panel
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin
+  )
+  install(FILES src/rviz/plugin_description.xml
+    DESTINATION share/${PROJECT_NAME}
+  )
+  pluginlib_export_plugin_description_file(rviz_common
+    src/rviz/plugin_description.xml
+  )
+endif()
 
 # ---- 安装 ----
 install(TARGETS

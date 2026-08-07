@@ -5,6 +5,9 @@ Panels:
     Name: Views
   - Class: rviz_common/Time
     Name: Time
+  - Class: sdc/HudPanel
+    Name: SDC HUD
+    Enabled: true
 
 Visualization Manager:
   Class: ""
@@ -16,16 +19,49 @@ Visualization Manager:
       Plane Cell Count: 60
       Cell Size: 1
 
-    # ---- 环形道路 Marker ----
+    # ---- 环形道路 Marker（Transient Local：打开即可看到） ----
     - Class: rviz_default_plugins/MarkerArray
-      Name: Simulation Markers
+      Name: Road Markers
+      Enabled: true
       Topic:
         Value: /simulation/markers
+        Depth: 5
         Reliability: Reliable
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+
+    # ---- 动态可视化（小车/路径/轨迹/状态文本） ----
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Live Markers
+      Enabled: true
+      Topic:
+        Value: /simulation/markers_live
+        Depth: 5
+        Reliability: Reliable
+        Durability Policy: Volatile
+        History Policy: Keep Last
+
+    # ---- LIDAR 点云 ----
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Lidar
+      Enabled: true
+      Topic:
+        Value: /sensor/lidar
+        Depth: 5
+        Reliability: Reliable
+        Durability Policy: Volatile
+        History Policy: Keep Last
+      Style: Points
+      Size (Pixels): 3
+      Color Transformer: FlatColor
+      Color: 255; 200; 60
+      Use Fixed Frame: true
+      Use rainbow: false
 
     # ---- TF 显示小车坐标系 ----
     - Class: rviz_default_plugins/TF
       Name: TF
+      Enabled: true
 
   Enabled: true
   Global Options:
