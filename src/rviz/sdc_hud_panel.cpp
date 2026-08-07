@@ -10,7 +10,6 @@
 #include <QString>
 
 #include <rviz_common/display_context.hpp>
-#include <rviz_common/ros_node_abstraction.hpp>
 
 namespace sdc {
 
@@ -62,8 +61,8 @@ HudPanel::HudPanel(QWidget* parent)
 void HudPanel::onInitialize() {
   // 使用 RViz 自身的 ROS 节点（由 RViz 负责 spin），避免额外线程
   if (!getDisplayContext()) return;
-  // Humble 中 getRosNodeAbstraction() 返回 shared_ptr
-  auto ros_node_abs = getDisplayContext()->getRosNodeAbstraction();
+  // Humble/Jazzy 中 getRosNodeAbstraction() 返回 weak_ptr，需 lock() 提升为 shared_ptr
+  auto ros_node_abs = getDisplayContext()->getRosNodeAbstraction().lock();
   if (!ros_node_abs) return;
   node_ = ros_node_abs->get_raw_node();
 

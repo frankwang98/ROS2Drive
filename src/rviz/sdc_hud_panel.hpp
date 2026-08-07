@@ -40,7 +40,7 @@ class HudPanel : public rviz_common::Panel {
   void load(const rviz_common::Config& config) override;
   void save(rviz_common::Config config) const override;
 
- private slots:
+ private Q_SLOTS:
   void onTogglePause();
   void onClearTrail();
   void onStatusTimer();

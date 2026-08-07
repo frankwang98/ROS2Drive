@@ -10,6 +10,11 @@
         - name: build
           script: |
             . /opt/ros/humble/setup.sh
+            # 安装 RViz/Qt5 依赖，确保 HUD 面板插件也被编译验证（避免插件被跳过）
+            apt-get update && apt-get install -y --no-install-recommends \
+              ros-humble-rviz-common \
+              ros-humble-pluginlib \
+              qtbase5-dev
             colcon build --packages-select self_driving_car_demo
         - name: smoke-test
           script: |
@@ -32,4 +37,11 @@
         - name: build
           script: |
             . /opt/ros/humble/setup.sh
+            # 安装 RViz/Qt5 依赖，确保 HUD 面板插件也被编译验证（避免插件被跳过）
+            apt-get update && apt-get install -y --no-install-recommends \
+              ros-humble-rviz-common \
+              ros-humble-pluginlib \
+              qtbase5-dev
             colcon build --packages-select self_driving_car_demo
+            # 校验 HUD 面板插件确实被编译（而非因缺少 rviz_common/Qt5 被跳过）
+            test -f build/self_driving_car_demo/libsdc_hud_panel.so && echo "HUD panel plugin built OK"
