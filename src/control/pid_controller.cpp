@@ -4,6 +4,8 @@
 
 namespace sdc {
 
+PidController::PidController() : p_(Params()) {}
+
 PidController::PidController(const Params& p) : p_(p) {}
 
 void PidController::reset() {

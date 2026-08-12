@@ -23,7 +23,8 @@ class PidController {
     double integral_limit = 20.0;  // 积分项限幅（抗饱和）
   };
 
-  explicit PidController(const Params& p = Params());
+  explicit PidController();                // 使用默认参数
+  explicit PidController(const Params& p); // 自定义参数
 
   /// 重置内部状态（误差积分 / 上次误差 / 上次微分）。
   void reset();
