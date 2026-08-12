@@ -1,12 +1,13 @@
 /**
- * ring_road_sim_node.cpp — 环形道路仿真节点
+ * ring_road_sim_node.cpp — 环形道路仿真节点（含避障 + 控制算法 + RViz 可视化）
  *
  * 功能：
  *   1. 用 RViz2 Marker 绘制环形道路（双车道 + 中央虚线）
- *   2. 在环道上模拟小车运动（感知 → 决策 → 控制）
- *   3. 用 Marker 可视化小车位置与朝向
- *   4. 发布 TF 坐标变换，方便在 RViz2 中查看
- *   5. 自动驾驶常用可视化：LIDAR 点云 / 规划路径 / 行驶轨迹 / 状态文本
+ *   2. 随机生成障碍物，并在 RViz 中以红色方块显示
+ *   3. 基于 Lattice 采样做局部规划避障，并可视化候选路径 / 最优路径
+ *   4. PID / Bang-Bang / Ramp 等多种速度控制算法（可通过话题切换）
+ *   5. 感知 → 决策 → 控制 闭环，小车沿环道避障行驶
+ *   6. 发布 TF 坐标变换、LIDAR、规划路径、状态文本等
  */
 
 #include <chrono>
@@ -25,9 +26,13 @@
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/float64.hpp>
+#include <std_msgs/msg/int32.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 
-#include "car/car.hpp"
+#include "control/velocity_controller.hpp"
+#include "decision/decision_maker.hpp"
+#include "planning/lattice_planner.hpp"
+#include "sim/obstacle_manager.hpp"
 
 using namespace std::chrono_literals;
 
@@ -48,6 +53,17 @@ constexpr int    PATH_SAMPLES    = 60;     // 规划路径采样点
 constexpr int    TRAIL_MAX_POINTS = 600;   // 行驶轨迹最多保留点数
 constexpr double CAR_HEAD_Z      = 2.6;    // 状态文本高度
 
+// ========== 决策目标速度 ==========
+static double target_speed_for_action(sdc::Action a) {
+  switch (a) {
+    case sdc::Action::kAccelerate: return 3.0;
+    case sdc::Action::kCruise:     return 2.0;
+    case sdc::Action::kBrake:      return 0.5;
+    case sdc::Action::kStop:       return 0.0;
+    default:                       return 0.0;
+  }
+}
+
 // ========== 工具函数 ==========
 static geometry_msgs::msg::Point make_point(double x, double y, double z = 0.0) {
   geometry_msgs::msg::Point p;
@@ -59,9 +75,12 @@ class RingRoadSimNode : public rclcpp::Node {
 public:
   RingRoadSimNode()
       : Node("ring_road_sim")
-      , car_()
       , angle_(0.0)
+      , lateral_(0.0)
       , sim_time_(0.0)
+      , obstacle_manager_(RING_RADIUS, ROAD_WIDTH, 20240812)
+      , lattice_planner_()
+      , velocity_controller_()
   {
     // 发布器：
     //  - 静态道路使用 transient_local + reliable，
@@ -73,17 +92,24 @@ public:
         "simulation/markers", road_qos);
     live_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>(
         "simulation/markers_live", live_qos);
+    // 障碍物可视化（独立话题，方便在 RViz 中单独开关）
+    obstacle_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>(
+        "simulation/obstacles", live_qos);
+    // 局部规划候选路径可视化
+    plan_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>(
+        "simulation/lattice", live_qos);
 
     // 自动驾驶常用可视化：LIDAR 点云
     lidar_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
         "sensor/lidar", live_qos);
 
-    // HUD 面板状态话题（供自定义 RViz 面板显示）
+    // HUD 面板状态话题
     speed_pub_     = create_publisher<std_msgs::msg::Float64>("sdc/speed", live_qos);
     action_pub_    = create_publisher<std_msgs::msg::Float64>("sdc/action_id", live_qos);
     distance_pub_  = create_publisher<std_msgs::msg::Float64>("sdc/front_distance", live_qos);
+    obstacle_pub2_ = create_publisher<std_msgs::msg::Float64>("sdc/obstacle_count", live_qos);
 
-    // 暂停/继续控制（供 HUD 面板按钮控制）
+    // 暂停/继续控制
     pause_sub_ = create_subscription<std_msgs::msg::Bool>(
         "sdc/pause", 10,
         [this](const std_msgs::msg::Bool::SharedPtr msg) {
@@ -91,7 +117,7 @@ public:
           RCLCPP_INFO(get_logger(), paused_ ? "仿真已暂停" : "仿真已继续");
         });
 
-    // 清除行驶轨迹（供 HUD 面板按钮控制）
+    // 清除行驶轨迹
     clear_sub_ = create_subscription<std_msgs::msg::Bool>(
         "sdc/clear_trail", 10,
         [this](const std_msgs::msg::Bool::SharedPtr msg) {
@@ -99,6 +125,18 @@ public:
             trail_.clear();
             RCLCPP_INFO(get_logger(), "行驶轨迹已清除");
           }
+        });
+
+    // 切换速度控制算法（0=PID 1=Bang-Bang 2=Ramp）
+    algo_sub_ = create_subscription<std_msgs::msg::Int32>(
+        "sdc/control_algo", 10,
+        [this](const std_msgs::msg::Int32::SharedPtr msg) {
+          int a = msg->data;
+          if (a == 1)      velocity_controller_.set_algorithm(sdc::VelocityAlgorithm::kBangBang);
+          else if (a == 2) velocity_controller_.set_algorithm(sdc::VelocityAlgorithm::kRamp);
+          else             velocity_controller_.set_algorithm(sdc::VelocityAlgorithm::kPid);
+          RCLCPP_INFO(get_logger(), "控制算法切换为: %s",
+                      sdc::velocity_algorithm_name(velocity_controller_.algorithm()));
         });
 
     // TF 广播
@@ -119,56 +157,89 @@ public:
         std::bind(&RingRoadSimNode::publish_lidar, this));
 
     RCLCPP_INFO(get_logger(),
-                "环形道路仿真启动：半径 %.1f m, 宽度 %.1f m, 步长 %.2f s",
-                RING_RADIUS, ROAD_WIDTH, SIM_DT);
+                "环形道路仿真启动：半径 %.1f m, 宽度 %.1f m, 步长 %.2f s, 控制算法=%s",
+                RING_RADIUS, ROAD_WIDTH, SIM_DT,
+                sdc::velocity_algorithm_name(velocity_controller_.algorithm()));
   }
 
 private:
   // ========== 仿真主循环 ==========
   void simulation_step() {
     if (!paused_) {
-      //  1. 感知：在一段环形测试场景中插入一个“前方车辆”，位于当前小车前方 4~30 m
-      //     这里用正弦函数模拟前车距离变化，产生加速 / 巡航 / 减速的交替行为
-      car_.set_front_distance(dynamic_obstacle_distance());
+      //  1. 更新随机障碍物
+      obstacle_manager_.update(SIM_DT);
 
-      //  2. 决策 + 控制 + 物理（沿用原有 Car::step）
-      double speed_before = car_.speed();
-      car_.step(SIM_DT);
-      double speed_after = car_.speed();
-      double avg_speed = 0.5 * (speed_before + speed_after);
+      //  2. 感知：计算小车前方最近障碍物距离
+      double front_dist = front_obstacle_distance();
 
-      //  3. 在环形道路上更新角度
+      //  3. 局部规划：lattice planner 生成候选轨迹并选择最优避障路径
+      double car_x, car_y, car_yaw;
+      car_pose(car_x, car_y, car_yaw);
+      auto obstacles = obstacle_manager_.to_planner_obstacles();
+      std::vector<sdc::LatticeTrajectory> candidates;
+      lattice_planner_.plan(car_x, car_y, car_yaw, obstacles, candidates);
+
+      //  4. 决策：根据前方距离决定目标速度
+      sdc::Action action = decision_maker_.decide(front_dist);
+      double target_speed = target_speed_for_action(action);
+
+      //  5. 控制：PID/其他算法闭环控制速度
+      double speed_before = speed_;
+      speed_ = velocity_controller_.update(target_speed, speed_, SIM_DT);
+      double avg_speed = 0.5 * (speed_before + speed_);
+
+      //  6. 运动学更新：沿环道前进 + 横向避障
       double arc_length = avg_speed * SIM_DT;
       angle_ += arc_length / RING_RADIUS;
 
-      //  4. 更新仿真总时间，并记录轨迹
+      // 横向：向最优轨迹的目标横向偏移平滑逼近
+      double target_lateral = 0.0;
+      for (const auto& c : candidates) {
+        if (c.selected) {
+          target_lateral = c.lateral_offset;
+          break;
+        }
+      }
+      double lat_rate = 1.5;  // 横向移动速率（m/s）
+      double max_lat = lat_rate * SIM_DT;
+      double dl = target_lateral - lateral_;
+      if (std::fabs(dl) > max_lat) {
+        lateral_ += (dl > 0 ? max_lat : -max_lat);
+      } else {
+        lateral_ = target_lateral;
+      }
+
+      //  7. 记录轨迹（车体位置）
       sim_time_ += SIM_DT;
-      trail_.push_back(make_point(RING_RADIUS * std::cos(angle_),
-                                  RING_RADIUS * std::sin(angle_),
+      trail_.push_back(make_point(RING_RADIUS * std::cos(angle_) + lateral_ * std::cos(angle_),
+                                  RING_RADIUS * std::sin(angle_) + lateral_ * std::sin(angle_),
                                   0.05));
       if (trail_.size() > TRAIL_MAX_POINTS) {
         trail_.pop_front();
       }
 
-      //  6. 日志（每 200 步打印一次，约 10 秒）
-      if (static_cast<int>(sim_time_ * 10) % 10 == 0 &&
+      //  8. 日志（约每 5 秒）
+      if (static_cast<int>(sim_time_ * 10) % 5 == 0 &&
           static_cast<int>(sim_time_ * 100) % 100 == 0) {
         RCLCPP_INFO(get_logger(),
-                    "[%.1fs] 角度:%.2f°  |  行为:%-6s  |  速度:%.2f m/s  |  距离:%.2f m",
+                    "[%.1fs] 行为:%-6s | 速度:%.2f | 前方:%.2f | 障碍物:%zu | 横向:%.2f",
                     sim_time_,
-                    angle_ * 180.0 / M_PI,
-                    sdc::action_name(car_.current_action()),
-                    car_.speed(),
-                    car_.front_distance());
+                    sdc::action_name(action),
+                    speed_,
+                    front_dist,
+                    obstacle_manager_.size(),
+                    lateral_);
       }
     }
 
-    //  5. 发布状态话题 + 小车可视化
+    //  9. 发布状态话题 + 可视化
     publish_status();
     publish_car_marker();
+    publish_obstacles_marker();
+    publish_lattice_marker();
     publish_car_tf();
 
-    //  6. 周期性重发静态道路（每 2 秒），保证后启动的 RViz2 能看到道路
+    //  10. 周期性重发静态道路（每 2 秒），保证后启动的 RViz2 能看到道路
     road_resend_accum_ += SIM_DT;
     if (road_resend_accum_ >= 2.0) {
       road_resend_accum_ = 0.0;
@@ -179,36 +250,51 @@ private:
   // ========== 状态话题发布 ==========
   void publish_status() {
     auto speed_msg = std_msgs::msg::Float64();
-    speed_msg.data = car_.speed();
+    speed_msg.data = speed_;
     speed_pub_->publish(speed_msg);
 
     auto action_msg = std_msgs::msg::Float64();
-    action_msg.data = static_cast<double>(static_cast<int>(car_.current_action()));
+    action_msg.data = static_cast<double>(static_cast<int>(decision_maker_.decide(front_obstacle_distance())));
     action_pub_->publish(action_msg);
 
     auto dist_msg = std_msgs::msg::Float64();
-    dist_msg.data = car_.front_distance();
+    dist_msg.data = front_obstacle_distance();
     distance_pub_->publish(dist_msg);
+
+    auto ob_msg = std_msgs::msg::Float64();
+    ob_msg.data = static_cast<double>(obstacle_manager_.size());
+    obstacle_pub2_->publish(ob_msg);
   }
 
-  // ========== 动态障碍物距离模拟 ==========
-  double dynamic_obstacle_distance() const {
-    // 在 3~30 m 之间正弦波动，周期 ≈ 20 秒
-    double base  = 16.0;
-    double amp   = 13.0;
-    double freq  = 2.0 * M_PI / 20.0;
-    return base + amp * std::sin(freq * sim_time_);
+  // ========== 前方障碍物距离感知 ==========
+  double front_obstacle_distance() const {
+    double car_x, car_y, car_yaw;
+    car_pose(car_x, car_y, car_yaw);
+    double fx = std::cos(car_yaw);  // 前进方向
+    double fy = std::sin(car_yaw);
+
+    double min_d = LIDAR_RANGE;
+    for (const auto& ob : obstacle_manager_.obstacles()) {
+      double dx = ob.x - car_x;
+      double dy = ob.y - car_y;
+      double dist = std::sqrt(dx * dx + dy * dy) - ob.radius;
+      // 只考虑小车前方的障碍物
+      if (dist < 0) dist = 0.0;
+      if (dist < min_d && (dx * fx + dy * fy) > 0.2) {
+        min_d = dist;
+      }
+    }
+    return min_d;
   }
 
-  // 小车当前位置（环道切线方向 yaw）
+  // 小车当前位置（环道切线方向 yaw），含横向偏移
   void car_pose(double & x, double & y, double & yaw) const {
-    x   = RING_RADIUS * std::cos(angle_);
-    y   = RING_RADIUS * std::sin(angle_);
+    x   = RING_RADIUS * std::cos(angle_) + lateral_ * std::cos(angle_);
+    y   = RING_RADIUS * std::sin(angle_) + lateral_ * std::sin(angle_);
     yaw = angle_ + M_PI_2;  // 切线方向
   }
 
   // ========== 环形道路可视化 ==========
-  // 构建静态道路 MarkerArray（缓存在 road_markers_）
   visualization_msgs::msg::MarkerArray build_road_markers() {
     visualization_msgs::msg::MarkerArray ma;
     // --- 路面（灰色半透明圆环） ---
@@ -229,7 +315,6 @@ private:
       for (int i = 0; i < RING_SEGMENTS; ++i) {
         double a0 = 2.0 * M_PI * i / RING_SEGMENTS;
         double a1 = 2.0 * M_PI * (i + 1) / RING_SEGMENTS;
-        // 两个三角形拼成一个梯形
         m.points.push_back(make_point(inner_r * std::cos(a0), inner_r * std::sin(a0), 0.0));
         m.points.push_back(make_point(outer_r * std::cos(a0), outer_r * std::sin(a0), 0.0));
         m.points.push_back(make_point(outer_r * std::cos(a1), outer_r * std::sin(a1), 0.0));
@@ -251,7 +336,7 @@ private:
       m.type  = visualization_msgs::msg::Marker::LINE_LIST;
       m.action = visualization_msgs::msg::Marker::ADD;
       m.pose.orientation.w = 1.0;
-      m.scale.x = 0.15;  // 线宽
+      m.scale.x = 0.15;
       m.color.r = 1.0f; m.color.g = 1.0f; m.color.b = 1.0f; m.color.a = 0.9f;
 
       constexpr int DASH_COUNT = 100;
@@ -310,18 +395,76 @@ private:
     return ma;
   }
 
-  // 发布静态道路
   void publish_road_markers() {
-    // 刷新每个 marker 的时间戳
     for (auto& mk : road_markers_.markers) {
       mk.header.stamp = now();
     }
     road_pub_->publish(road_markers_);
   }
 
+  // ========== 障碍物可视化 ==========
+  void publish_obstacles_marker() {
+    visualization_msgs::msg::MarkerArray ma;
+    int id = 0;
+    for (const auto& ob : obstacle_manager_.obstacles()) {
+      visualization_msgs::msg::Marker m;
+      m.header.frame_id = "world";
+      m.header.stamp    = now();
+      m.ns    = "obstacles";
+      m.id    = id++;
+      m.type  = visualization_msgs::msg::Marker::CUBE;
+      m.action = visualization_msgs::msg::Marker::ADD;
+      m.pose.position.x = ob.x;
+      m.pose.position.y = ob.y;
+      m.pose.position.z = 0.5;
+      m.pose.orientation.w = 1.0;
+      double sz = 2.0 * ob.radius;
+      m.scale.x = sz;
+      m.scale.y = sz;
+      m.scale.z = 1.0;
+      // 红/橙障碍物
+      m.color.r = 0.95f; m.color.g = 0.25f; m.color.b = 0.1f; m.color.a = 0.95f;
+      ma.markers.push_back(m);
+    }
+    obstacle_pub_->publish(ma);
+  }
+
+  // ========== 局部规划候选路径可视化 ==========
+  void publish_lattice_marker() {
+    double car_x, car_y, car_yaw;
+    car_pose(car_x, car_y, car_yaw);
+    auto obstacles = obstacle_manager_.to_planner_obstacles();
+    std::vector<sdc::LatticeTrajectory> candidates;
+    lattice_planner_.plan(car_x, car_y, car_yaw, obstacles, candidates);
+
+    visualization_msgs::msg::MarkerArray ma;
+    int id = 0;
+    for (const auto& c : candidates) {
+      visualization_msgs::msg::Marker m;
+      m.header.frame_id = "world";
+      m.header.stamp    = now();
+      m.ns    = "lattice_candidates";
+      m.id    = id++;
+      m.type  = visualization_msgs::msg::Marker::LINE_STRIP;
+      m.action = visualization_msgs::msg::Marker::ADD;
+      m.pose.orientation.w = 1.0;
+      m.scale.x = 0.06;
+      // 选中的最优路径高亮为绿色，其余候选为灰色
+      if (c.selected) {
+        m.color.r = 0.0f; m.color.g = 1.0f; m.color.b = 0.0f; m.color.a = 1.0f;
+        m.scale.x = 0.18;
+      } else {
+        m.color.r = 0.6f; m.color.g = 0.6f; m.color.b = 0.6f; m.color.a = 0.35f;
+      }
+      for (const auto& pt : c.path) {
+        m.points.push_back(make_point(pt.x, pt.y, 0.12));
+      }
+      ma.markers.push_back(m);
+    }
+    plan_pub_->publish(ma);
+  }
+
   // ========== LIDAR 点云 ==========
-  // 模拟 2D 激光雷达：在当前小车位置，向环道边界发射 360 条射线，
-  // 命中内/外边界或路面/标线即生成一个点，形成道路轮廓点云。
   void publish_lidar() {
     double car_x, car_y, car_yaw;
     car_pose(car_x, car_y, car_yaw);
@@ -348,16 +491,29 @@ private:
       double dx = std::cos(theta);
       double dy = std::sin(theta);
 
-      // 射线与内/外圆环求交，取最近命中点（命中在道路范围内才有效）
+      // 射线与内/外圆环求交，取最近命中点
       double dist = LIDAR_RANGE;
       double hit_t = -1.0;
       for (double r : {inner_r, outer_r}) {
-        // 解 |p + t*d|^2 = r^2
         double b = car_x * dx + car_y * dy;
         double c = car_x * car_x + car_y * car_y - r * r;
         double disc = b * b - c;
         if (disc >= 0.0) {
-          double t = -b - std::sqrt(disc);  // 最近交点（沿射线方向）
+          double t = -b - std::sqrt(disc);
+          if (t > 0.2 && t < LIDAR_RANGE && (hit_t < 0.0 || t < hit_t)) {
+            hit_t = t;
+          }
+        }
+      }
+      // 障碍物也会被 LIDAR 探测到：命中最近的障碍物
+      for (const auto& ob : obstacle_manager_.obstacles()) {
+        // 射线与圆（障碍物）求交
+        double ox = ob.x - car_x, oy = ob.y - car_y;
+        double b = dx * ox + dy * oy;
+        double c = ox * ox + oy * oy - ob.radius * ob.radius;
+        double disc = b * b - c;
+        if (disc >= 0.0) {
+          double t = -b - std::sqrt(disc);
           if (t > 0.2 && t < LIDAR_RANGE && (hit_t < 0.0 || t < hit_t)) {
             hit_t = t;
           }
@@ -365,7 +521,6 @@ private:
       }
       if (hit_t > 0.0) dist = hit_t;
 
-      // 给 LIDAR 点加一点测量噪声，更真实
       double rr = dist + std::sin(sim_time_ * 37.0 + i * 1.3) * 0.02;
       if (rr < 0.2) rr = 0.2;
 
@@ -396,13 +551,12 @@ private:
       m.pose.position.x = car_x;
       m.pose.position.y = car_y;
       m.pose.position.z = 0.5;
-      // 朝向：环形切线方向
       double yaw = car_yaw;
       m.pose.orientation.z = std::sin(yaw / 2.0);
       m.pose.orientation.w = std::cos(yaw / 2.0);
-      m.scale.x = 1.8;  // 长
-      m.scale.y = 0.9;  // 宽
-      m.scale.z = 0.6;  // 高
+      m.scale.x = 1.8;
+      m.scale.y = 0.9;
+      m.scale.z = 0.6;
       m.color.r = 0.1f; m.color.g = 0.4f; m.color.b = 0.9f; m.color.a = 1.0f;
       ma.markers.push_back(m);
     }
@@ -420,15 +574,12 @@ private:
       m.pose.position.y = car_y;
       m.pose.position.z = 1.2;
       double yaw = car_yaw;
-      // 箭头方向 = 切线方向（速度方向）
       m.pose.orientation.z = std::sin(yaw / 2.0);
       m.pose.orientation.w = std::cos(yaw / 2.0);
-      double speed = car_.speed();
-      m.scale.x = 0.6 + speed * 0.3;  // 箭头长度随速度变化
+      m.scale.x = 0.6 + speed_ * 0.3;
       m.scale.y = 0.25;
       m.scale.z = 0.25;
-      // 颜色随行为变化
-      switch (car_.current_action()) {
+      switch (decision_maker_.decide(front_obstacle_distance())) {
         case sdc::Action::kAccelerate: m.color.r = 0.0f; m.color.g = 1.0f; m.color.b = 0.0f; break;
         case sdc::Action::kCruise:     m.color.r = 0.0f; m.color.g = 0.6f; m.color.b = 1.0f; break;
         case sdc::Action::kBrake:      m.color.r = 1.0f; m.color.g = 0.6f; m.color.b = 0.0f; break;
@@ -438,7 +589,7 @@ private:
       ma.markers.push_back(m);
     }
 
-    // 规划路径（绿色实线，沿环道中心向前延伸）
+    // 规划路径（沿环道中心前伸，绿色实线）
     {
       visualization_msgs::msg::Marker m;
       m.header.frame_id = "world";
@@ -448,7 +599,7 @@ private:
       m.type  = visualization_msgs::msg::Marker::LINE_STRIP;
       m.action = visualization_msgs::msg::Marker::ADD;
       m.pose.orientation.w = 1.0;
-      m.scale.x = 0.12;  // 线宽
+      m.scale.x = 0.12;
       m.color.r = 0.0f; m.color.g = 1.0f; m.color.b = 0.2f; m.color.a = 0.95f;
 
       for (int i = 0; i <= PATH_SAMPLES; ++i) {
@@ -489,15 +640,16 @@ private:
       m.pose.position.x = car_x;
       m.pose.position.y = car_y;
       m.pose.position.z = CAR_HEAD_Z;
-      m.scale.z = 1.4;  // 字号
+      m.scale.z = 1.4;
       m.color.r = 1.0f; m.color.g = 1.0f; m.color.b = 1.0f; m.color.a = 1.0f;
 
-      char buf[128];
+      char buf[160];
       std::snprintf(buf, sizeof(buf),
-                    "v=%.1f m/s  %s\nfront=%.1f m",
-                    car_.speed(),
-                    sdc::action_name(car_.current_action()),
-                    car_.front_distance());
+                    "v=%.1f m/s  %s\nfront=%.1f m  algo=%s",
+                    speed_,
+                    sdc::action_name(decision_maker_.decide(front_obstacle_distance())),
+                    front_obstacle_distance(),
+                    sdc::velocity_algorithm_name(velocity_controller_.algorithm()));
       m.text = buf;
       ma.markers.push_back(m);
     }
@@ -526,24 +678,33 @@ private:
   }
 
   // ========== 成员变量 ==========
-  sdc::Car car_;
-  double   angle_;     // 小车在环道上的角度（弧度）
-  double   sim_time_;  // 仿真累计时间
-  double   road_resend_accum_{0.0};  // 静态道路重发计时
-  bool     paused_{false};           // 暂停/继续控制
+  sdc::DecisionMaker decision_maker_;
+  sdc::VelocityController velocity_controller_;
+  sdc::ObstacleManager obstacle_manager_;
+  sdc::LatticePlanner lattice_planner_;
 
-  std::deque<geometry_msgs::msg::Point> trail_;  // 行驶轨迹缓存
+  double   angle_{0.0};      // 小车纵向角度（弧度）
+  double   lateral_{0.0};    // 小车横向偏移（米，相对环道中心线）
+  double   speed_{0.0};      // 小车当前速度（m/s）
+  double   sim_time_{0.0};   // 仿真累计时间
+  double   road_resend_accum_{0.0};
+  bool     paused_{false};
 
-  visualization_msgs::msg::MarkerArray road_markers_;  // 缓存的静态道路
+  std::deque<geometry_msgs::msg::Point> trail_;
+  visualization_msgs::msg::MarkerArray road_markers_;
 
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr road_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr live_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr obstacle_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr plan_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr        lidar_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr               speed_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr               action_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr               distance_pub_;
+  rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr               obstacle_pub2_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr               pause_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr               clear_sub_;
+  rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr              algo_sub_;
   rclcpp::TimerBase::SharedPtr                                       timer_;
   rclcpp::TimerBase::SharedPtr                                       lidar_timer_;
   std::shared_ptr<tf2_ros::TransformBroadcaster>                     tf_broadcaster_;
