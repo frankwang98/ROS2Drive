@@ -26,7 +26,8 @@ class AckermannModel {
     double max_steer_rate = 0.9; // 前轮最大转角变化率（rad/s），抑制"画龙"
   };
 
-  explicit AckermannModel(const Params& p = Params());
+  explicit AckermannModel();
+  explicit AckermannModel(const Params& p);
 
   /// 重置状态。
   void reset(double x, double y, double yaw, double speed = 0.0, double steer = 0.0);

@@ -2,6 +2,8 @@
 
 namespace sdc {
 
+AckermannModel::AckermannModel() : p_(Params()) {}
+
 AckermannModel::AckermannModel(const Params& p) : p_(p) {}
 
 void AckermannModel::reset(double x, double y, double yaw, double speed, double steer) {

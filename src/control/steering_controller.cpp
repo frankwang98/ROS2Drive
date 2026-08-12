@@ -2,6 +2,8 @@
 
 namespace sdc {
 
+SteeringController::SteeringController() : p_(Params()) {}
+
 SteeringController::SteeringController(const Params& p) : p_(p) {}
 
 double SteeringController::compute(double car_x, double car_y, double car_yaw,

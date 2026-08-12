@@ -20,7 +20,8 @@ class SteeringController {
     double max_steer = 0.55; // 输出前轮最大转角（弧度），与运动学模型一致
   };
 
-  explicit SteeringController(const Params& p = Params());
+  explicit SteeringController();
+  explicit SteeringController(const Params& p);
 
   /// 计算目标前轮转角。
   /// @param car_x, car_y, car_yaw 小车当前位姿
