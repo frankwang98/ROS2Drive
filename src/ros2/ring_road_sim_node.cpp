@@ -30,7 +30,9 @@
 #include <tf2_ros/transform_broadcaster.h>
 
 #include "control/velocity_controller.hpp"
+#include "control/steering_controller.hpp"
 #include "decision/decision_maker.hpp"
+#include "model/ackermann_model.hpp"
 #include "planning/lattice_planner.hpp"
 #include "sim/obstacle_manager.hpp"
 
@@ -44,6 +46,9 @@ constexpr int    RING_SEGMENTS   = 200;    // 环形分段数（越多越圆）
 constexpr double RING_HEIGHT     = 0.05;   // 路面厚度
 constexpr double LINE_HEIGHT     = 0.06;   // 标线高度
 constexpr double SIM_DT          = 0.05;   // 仿真步长（秒）
+
+// ========== 阿克曼转向控制参数 ==========
+constexpr double LOOKAHEAD      = 6.0;    // 转向目标点的前视距离（米）
 
 // ========== 自动驾驶可视化参数 ==========
 constexpr double LIDAR_RANGE     = 35.0;   // LIDAR 探测距离（米）
@@ -75,12 +80,12 @@ class RingRoadSimNode : public rclcpp::Node {
 public:
   RingRoadSimNode()
       : Node("ring_road_sim")
-      , angle_(0.0)
-      , lateral_(0.0)
       , sim_time_(0.0)
       , obstacle_manager_(RING_RADIUS, ROAD_WIDTH, 20240812)
       , lattice_planner_()
       , velocity_controller_()
+      , steering_controller_()
+      , ackermann_()
   {
     // 发布器：
     //  - 静态道路使用 transient_local + reliable，
@@ -156,8 +161,11 @@ public:
         std::chrono::milliseconds(100),
         std::bind(&RingRoadSimNode::publish_lidar, this));
 
+    // 初始化阿克曼运动学模型：起点位于环道东侧（角度 0），朝向切线方向（π/2）
+    ackermann_.reset(RING_RADIUS, 0.0, M_PI_2, 0.0, 0.0);
+
     RCLCPP_INFO(get_logger(),
-                "环形道路仿真启动：半径 %.1f m, 宽度 %.1f m, 步长 %.2f s, 控制算法=%s",
+                "环形道路仿真启动：半径 %.1f m, 宽度 %.1f m, 步长 %.2f s, 控制算法=%s, 运动学=阿克曼单车模型",
                 RING_RADIUS, ROAD_WIDTH, SIM_DT,
                 sdc::velocity_algorithm_name(velocity_controller_.algorithm()));
   }
@@ -184,15 +192,10 @@ private:
       double target_speed = target_speed_for_action(action);
 
       //  5. 控制：PID/其他算法闭环控制速度
-      double speed_before = speed_;
       speed_ = velocity_controller_.update(target_speed, speed_, SIM_DT);
-      double avg_speed = 0.5 * (speed_before + speed_);
 
-      //  6. 运动学更新：沿环道前进 + 横向避障
-      double arc_length = avg_speed * SIM_DT;
-      angle_ += arc_length / RING_RADIUS;
-
-      // 横向：向最优轨迹的目标横向偏移平滑逼近
+      //  6. 阿克曼运动学更新：基于转向控制 + 单车模型，真实转弯行驶
+      //  6.1 确定目标横向偏移（避障后的期望车道位置）
       double target_lateral = 0.0;
       for (const auto& c : candidates) {
         if (c.selected) {
@@ -200,20 +203,26 @@ private:
           break;
         }
       }
-      double lat_rate = 1.5;  // 横向移动速率（m/s）
-      double max_lat = lat_rate * SIM_DT;
-      double dl = target_lateral - lateral_;
-      if (std::fabs(dl) > max_lat) {
-        lateral_ += (dl > 0 ? max_lat : -max_lat);
-      } else {
-        lateral_ = target_lateral;
-      }
+      //  6.2 沿环道取前视目标点（含目标横向偏移），作为转向跟踪的期望路径点
+      double car_x2, car_y2, car_yaw2;
+      car_pose(car_x2, car_y2, car_yaw2);
+      double goal_angle = angle_of_pose(car_x2, car_y2);
+      double goal_a = goal_angle + LOOKAHEAD / RING_RADIUS;
+      double goal_x = (RING_RADIUS + target_lateral) * std::cos(goal_a);
+      double goal_y = (RING_RADIUS + target_lateral) * std::sin(goal_a);
 
-      //  7. 记录轨迹（车体位置）
+      //  6.3 Stanley 转向控制 → 前轮转角
+      double steer = steering_controller_.compute(
+          car_x2, car_y2, car_yaw2, goal_x, goal_y, speed_);
+
+      //  6.4 单车运动学积分（含转向限幅与转向速率限制，抑制"画龙"）
+      ackermann_.update(speed_, steer, SIM_DT);
+
+      //  7. 记录轨迹（基于运动学模型的实际车体位置）
       sim_time_ += SIM_DT;
-      trail_.push_back(make_point(RING_RADIUS * std::cos(angle_) + lateral_ * std::cos(angle_),
-                                  RING_RADIUS * std::sin(angle_) + lateral_ * std::sin(angle_),
-                                  0.05));
+      double tx, ty, tyaw;
+      car_pose(tx, ty, tyaw);
+      trail_.push_back(make_point(tx, ty, 0.05));
       if (trail_.size() > TRAIL_MAX_POINTS) {
         trail_.pop_front();
       }
@@ -222,13 +231,14 @@ private:
       if (static_cast<int>(sim_time_ * 10) % 5 == 0 &&
           static_cast<int>(sim_time_ * 100) % 100 == 0) {
         RCLCPP_INFO(get_logger(),
-                    "[%.1fs] 行为:%-6s | 速度:%.2f | 前方:%.2f | 障碍物:%zu | 横向:%.2f",
+                    "[%.1fs] 行为:%-6s | 速度:%.2f | 前方:%.2f | 障碍物:%zu | 横向:%.2f | 转角:%.2f°",
                     sim_time_,
                     sdc::action_name(action),
                     speed_,
                     front_dist,
                     obstacle_manager_.size(),
-                    lateral_);
+                    lateral_offset(tx, ty),
+                    ackermann_.steer() * 180.0 / M_PI);
       }
     }
 
@@ -287,11 +297,21 @@ private:
     return min_d;
   }
 
-  // 小车当前位置（环道切线方向 yaw），含横向偏移
+  // 小车当前位置：直接来自阿克曼运动学模型（x, y 为世界坐标，yaw 为朝向）
   void car_pose(double & x, double & y, double & yaw) const {
-    x   = RING_RADIUS * std::cos(angle_) + lateral_ * std::cos(angle_);
-    y   = RING_RADIUS * std::sin(angle_) + lateral_ * std::sin(angle_);
-    yaw = angle_ + M_PI_2;  // 切线方向
+    x   = ackermann_.x();
+    y   = ackermann_.y();
+    yaw = ackermann_.yaw();
+  }
+
+  // 将小车位置映射回环道对应的角度（用于计算前视目标点）
+  static double angle_of_pose(double x, double y) {
+    return std::atan2(y, x);
+  }
+
+  // 小车相对环道中心线的横向偏移（世界半径 - 环道半径）
+  static double lateral_offset(double x, double y) {
+    return std::hypot(x, y) - RING_RADIUS;
   }
 
   // ========== 环形道路可视化 ==========
@@ -602,9 +622,10 @@ private:
       m.scale.x = 0.12;
       m.color.r = 0.0f; m.color.g = 1.0f; m.color.b = 0.2f; m.color.a = 0.95f;
 
+      double base_a = angle_of_pose(car_x, car_y);
       for (int i = 0; i <= PATH_SAMPLES; ++i) {
         double s = PATH_LENGTH * i / PATH_SAMPLES;
-        double a = angle_ + s / RING_RADIUS;
+        double a = base_a + s / RING_RADIUS;
         m.points.push_back(make_point(RING_RADIUS * std::cos(a),
                                       RING_RADIUS * std::sin(a),
                                       0.15));
@@ -680,11 +701,11 @@ private:
   // ========== 成员变量 ==========
   sdc::DecisionMaker decision_maker_;
   sdc::VelocityController velocity_controller_;
+  sdc::SteeringController steering_controller_;
   sdc::ObstacleManager obstacle_manager_;
   sdc::LatticePlanner lattice_planner_;
+  sdc::AckermannModel ackermann_;
 
-  double   angle_{0.0};      // 小车纵向角度（弧度）
-  double   lateral_{0.0};    // 小车横向偏移（米，相对环道中心线）
   double   speed_{0.0};      // 小车当前速度（m/s）
   double   sim_time_{0.0};   // 仿真累计时间
   double   road_resend_accum_{0.0};

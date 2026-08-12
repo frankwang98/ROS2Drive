@@ -12,6 +12,7 @@
 - **随机障碍物系统**：在环形道路上随机生成 / 消失障碍物（位置、大小、存活时长随机），RViz 中以红色方块实时显示
 - **Lattice 局部规划避障**：基于 lattice 采样生成多条候选局部路径，根据与障碍物的距离与横向偏移评估代价，选择最优避障轨迹，并在 RViz 中显示候选路径（灰）与选中的最优路径（绿）
 - **多种速度控制算法**：支持 PID / Bang-Bang / Ramp 三种算法，可通过话题 `/sdc/control_algo` 实时切换
+- **阿克曼运动学模型**：小车基于**单车（bicycle）模型**真实转弯行驶（非完整约束），满足 `yaw' = v/L·tan(δ)`；配合 Stanley 转向控制（航向误差 + 前轴横向误差）平滑跟踪期望路径，避免随意斜线滑移与"画龙"抖动
 - **环形道路仿真节点** (`ring_road_sim`)：
   - RViz2 Marker 绘制环形双车道（路面 + 内/外边界 + 中央虚线）
   - 小车沿环道避障行驶，动态障碍物驱动感知→决策→控制闭环
@@ -43,6 +44,8 @@
 │   ├── control/motor_controller.hpp
 │   ├── control/pid_controller.hpp      # PID 控制器
 │   ├── control/velocity_controller.hpp # 多种速度控制算法（PID/Bang-Bang/Ramp）
+│   ├── control/steering_controller.hpp # Stanley 转向控制器
+│   ├── model/ackermann_model.hpp       # 阿克曼（单车）运动学模型
 │   ├── planning/lattice_planner.hpp    # Lattice 局部规划避障
 │   └── sim/obstacle_manager.hpp        # 随机障碍物管理器
 ├── src/
@@ -53,6 +56,8 @@
 │   ├── control/motor_controller.cpp
 │   ├── control/pid_controller.cpp
 │   ├── control/velocity_controller.cpp
+│   ├── control/steering_controller.cpp # Stanley 转向控制实现
+│   ├── model/ackermann_model.cpp       # 阿克曼运动学模型实现
 │   ├── planning/lattice_planner.cpp
 │   ├── sim/obstacle_manager.cpp
 │   └── ros2/
