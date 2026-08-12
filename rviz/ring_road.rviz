@@ -73,6 +73,30 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /simulation/markers_live
       Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: obstacles
+      Namespaces:
+        obstacles: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /simulation/obstacles
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: lattice
+      Namespaces:
+        lattice_candidates: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /simulation/lattice
+      Value: true
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:

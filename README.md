@@ -9,17 +9,21 @@
 - **感知层**：距离传感器模拟，检测小车前方障碍物距离（含噪声）
 - **决策层**：根据传感器数据决定小车行为（加速 / 匀速 / 减速 / 停车）
 - **控制层**：电机控制器，根据决策结果平滑调节速度
+- **随机障碍物系统**：在环形道路上随机生成 / 消失障碍物（位置、大小、存活时长随机），RViz 中以红色方块实时显示
+- **Lattice 局部规划避障**：基于 lattice 采样生成多条候选局部路径，根据与障碍物的距离与横向偏移评估代价，选择最优避障轨迹，并在 RViz 中显示候选路径（灰）与选中的最优路径（绿）
+- **多种速度控制算法**：支持 PID / Bang-Bang / Ramp 三种算法，可通过话题 `/sdc/control_algo` 实时切换
 - **环形道路仿真节点** (`ring_road_sim`)：
   - RViz2 Marker 绘制环形双车道（路面 + 内/外边界 + 中央虚线）
-  - 小车沿环道行驶，动态障碍物驱动感知→决策→控制闭环
+  - 小车沿环道避障行驶，动态障碍物驱动感知→决策→控制闭环
   - 车体 + 速度矢量箭头（颜色随加速/巡航/减速/停车变化）
   - TF 广播 `world → car_base_link`
 - **自动驾驶常用可视化控件**（仿真节点内置）：
-  - LIDAR 点云（360° 扫描，`/sensor/lidar`，PointCloud2）
+  - LIDAR 点云（360° 扫描，`/sensor/lidar`，PointCloud2，含障碍物反射）
   - 规划路径（绿色曲线沿环道中心前伸）
   - 行驶轨迹（青色历史轨迹，可清除）
-  - 状态 3D 文本（速度 / 行为 / 前方距离，悬于车顶）
-  - HUD 控制话题：`/sdc/speed`、`/sdc/action_id`、`/sdc/front_distance`、`/sdc/pause`、`/sdc/clear_trail`
+  - 状态 3D 文本（速度 / 行为 / 前方距离 / 控制算法，悬于车顶）
+  - 障碍物（`/simulation/obstacles`）与局部规划候选路径（`/simulation/lattice`）
+  - HUD 控制话题：`/sdc/speed`、`/sdc/action_id`、`/sdc/front_distance`、`/sdc/pause`、`/sdc/clear_trail`、`/sdc/control_algo`
 - **RViz 自定义 HUD 面板插件** (`sdc/HudPanel`)：
   - 实时显示速度 / 行为 / 前方距离
   - 暂停 / 继续仿真、清除轨迹按钮
@@ -36,15 +40,23 @@
 │   ├── car/car.hpp             # 小车实体（集成各子系统）
 │   ├── sensor/distance_sensor.hpp
 │   ├── decision/decision_maker.hpp
-│   └── control/motor_controller.hpp
+│   ├── control/motor_controller.hpp
+│   ├── control/pid_controller.hpp      # PID 控制器
+│   ├── control/velocity_controller.hpp # 多种速度控制算法（PID/Bang-Bang/Ramp）
+│   ├── planning/lattice_planner.hpp    # Lattice 局部规划避障
+│   └── sim/obstacle_manager.hpp        # 随机障碍物管理器
 ├── src/
 │   ├── main.cpp                # 旧版单机 demo（不依赖 ROS2）
 │   ├── car/car.cpp
 │   ├── sensor/distance_sensor.cpp
 │   ├── decision/decision_maker.cpp
 │   ├── control/motor_controller.cpp
+│   ├── control/pid_controller.cpp
+│   ├── control/velocity_controller.cpp
+│   ├── planning/lattice_planner.cpp
+│   ├── sim/obstacle_manager.cpp
 │   └── ros2/
-│       ├── ring_road_sim_node.cpp    # 环形道路仿真 + 可视化 + LIDAR/HUD
+│       ├── ring_road_sim_node.cpp    # 环形道路仿真 + 可视化 + LIDAR/HUD/避障
 │       └── car_controller_node.cpp   # 小车控制器节点
 └── src/rviz/
     ├── sdc_hud_panel.hpp / .cpp      # RViz 自定义 HUD 控制面板（可选编译）
@@ -83,15 +95,28 @@ ros2 launch self_driving_car_demo ring_road.launch.py
 启动后即可在 RViz2 中看到（`ring_road.rviz` 已默认加载以下话题与面板，**无需手动订阅**）：
 - 灰色环形双车道 + 白色标线（`/simulation/markers`，Transient Local，打开即可见）
 - 蓝色小车沿环道行驶 + 速度矢量箭头（颜色随行为变化：绿=加速 / 蓝=巡航 / 橙=减速 / 红=停车）
+- 随机红色障碍物方块（`/simulation/obstacles`，随机生成 / 消失）
+- Lattice 局部规划：灰色候选路径 + 绿色选中的最优避障路径（`/simulation/lattice`）
 - 绿色规划路径 + 青色行驶轨迹 + 车顶 3D 状态文本（`/simulation/markers_live`）
 - 360° LIDAR 点云（黄色，`/sensor/lidar`）
 - **SDC HUD 面板**（右侧，`sdc/HudPanel`）：实时显示小车状态，支持暂停/继续、清除轨迹
 
 > 如果使用自定义 RViz 窗口，可手动添加以上话题与面板：
 > - `/simulation/markers`（道路，MarkerArray）
+> - `/simulation/obstacles`（障碍物，MarkerArray）
+> - `/simulation/lattice`（局部规划候选路径，MarkerArray）
 > - `/simulation/markers_live`（小车/路径/轨迹/文本）
 > - `/sensor/lidar`（LIDAR 点云）
 > - 面板：`Panels → Add → New panel → sdc/HudPanel`
+
+## 切换速度控制算法
+
+仿真默认使用 **PID** 控制。运行时可通过话题实时切换（`0=PID 1=Bang-Bang 2=Ramp`）：
+
+```bash
+ros2 topic pub --once /sdc/control_algo std_msgs/msg/Int32 "{data: 1}"   # 切到 Bang-Bang
+ros2 topic pub --once /sdc/control_algo std_msgs/msg/Int32 "{data: 0}"   # 切回 PID
+```
 
 ## 独立运行旧版单机 demo（不依赖 ROS2）
 
@@ -112,7 +137,8 @@ cmake .. && make
 
 ## 后续规划
 
-- [ ] 加入 PID 速度控制
-- [ ] 加入路径规划与避障算法
+- [x] 加入 PID 速度控制（含 Bang-Bang / Ramp 多种算法，可实时切换）
+- [x] 加入局部路径规划避障（Lattice Planner，RViz 可视化候选与最优路径）
+- [x] 随机动态障碍物系统（RViz 实时显示）
 - [ ] 接入真实传感器（超声波 / 激光雷达）数据
 - [ ] 扩展为 Gazebo 物理仿真

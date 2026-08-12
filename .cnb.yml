@@ -26,8 +26,11 @@
             ros2 node list | grep -q ring_road_sim
             ros2 topic list | grep -q /simulation/markers
             ros2 topic list | grep -q /simulation/markers_live
+            ros2 topic list | grep -q /simulation/obstacles
+            ros2 topic list | grep -q /simulation/lattice
             ros2 topic list | grep -q /sensor/lidar
             ros2 topic list | grep -q /sdc/speed
+            ros2 topic list | grep -q /sdc/control_algo
             echo "smoke test passed"
   pull_request:
     - name: ros2-build
