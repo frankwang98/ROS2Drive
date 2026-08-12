@@ -39,6 +39,8 @@ add_library(sdc_core STATIC
   src/control/motor_controller.cpp
   src/control/pid_controller.cpp
   src/control/velocity_controller.cpp
+  src/control/steering_controller.cpp
+  src/model/ackermann_model.cpp
   src/planning/lattice_planner.cpp
   src/sim/obstacle_manager.cpp
   src/car/car.cpp
