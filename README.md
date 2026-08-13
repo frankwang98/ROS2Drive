@@ -13,9 +13,9 @@
 - **Lattice 局部规划避障**：基于 lattice 采样生成多条候选局部路径，根据与障碍物的距离与横向偏移评估代价，选择最优避障轨迹，并在 RViz 中显示候选路径（灰）与选中的最优路径（绿）
 - **多种速度控制算法**：支持 PID / Bang-Bang / Ramp 三种算法，可通过话题 `/sdc/control_algo` 实时切换
 - **阿克曼运动学模型**：小车基于**单车（bicycle）模型**真实转弯行驶（非完整约束），满足 `yaw' = v/L·tan(δ)`；配合 Stanley 转向控制（航向误差 + 前轴横向误差）平滑跟踪期望路径，避免随意斜线滑移与"画龙"抖动
-- **环形道路仿真节点** (`ring_road_sim`)：
-  - RViz2 Marker 绘制环形双车道（路面 + 内/外边界 + 中央虚线）
-  - 小车沿环道避障行驶，动态障碍物驱动感知→决策→控制闭环
+- **自动驾驶仿真节点** (`ring_road_sim`)：内置 **2 张地图**
+  - **环形道路（Map 1）**：RViz2 Marker 绘制环形双车道（路面 + 内/外边界 + 中央虚线），小车沿环道避障行驶，HUD 提供「开始 / 暂停」
+  - **科目二综合赛道（Map 2）**：倒车入库 / 侧方停车 / 直角转弯 三个科目**在同一条道路上**依次完成，HUD 提供「开始考试」，**无障碍物**
   - 车体 + 速度矢量箭头（颜色随加速/巡航/减速/停车变化）
   - TF 广播 `world → car_base_link`
 - **自动驾驶常用可视化控件**（仿真节点内置）：
@@ -24,10 +24,11 @@
   - 行驶轨迹（青色历史轨迹，可清除）
   - 状态 3D 文本（速度 / 行为 / 前方距离 / 控制算法，悬于车顶）
   - 障碍物（`/simulation/obstacles`）与局部规划候选路径（`/simulation/lattice`）
-  - HUD 控制话题：`/sdc/speed`、`/sdc/action_id`、`/sdc/front_distance`、`/sdc/pause`、`/sdc/clear_trail`、`/sdc/control_algo`
+  - HUD 控制话题：`/sdc/speed`、`/sdc/action_id`、`/sdc/front_distance`、`/sdc/start`、`/sdc/pause`、`/sdc/clear_trail`、`/sdc/control_algo`、`/sdc/set_map`、`/sdc/start_exam`、`/sdc/exam_status`
 - **RViz 自定义 HUD 面板插件** (`sdc/HudPanel`)：
   - 实时显示速度 / 行为 / 前方距离
-  - 暂停 / 继续仿真、清除轨迹按钮
+  - 切换地图（环形道路 / 科目二综合赛道）
+  - 环形道路：开始 / 暂停；科目二：开始考试
   - 随 `ring_road.rviz` 默认加载
 - **小车控制器节点** (`car_controller`)：独立 ROS2 节点，订阅距离话题 → 决策 → 控制 → 发布速度
 
@@ -94,9 +95,9 @@ colcon build --packages-select self_driving_car_demo
 source install/setup.bash
 
 # 3. 启动仿真（自动拉起 RViz2）。可用 map 参数指定初始地图：
-#     0=环形道路 1=倒车入库 2=侧方停车 3=直角转弯
+#     0=环形道路 1=科目二综合赛道
 ros2 launch self_driving_car_demo ring_road.launch.py
-ros2 launch self_driving_car_demo ring_road.launch.py map:=1   # 直接倒车入库
+ros2 launch self_driving_car_demo ring_road.launch.py map:=1   # 科目二综合赛道
 ```
 
 启动后即可在 RViz2 中看到（`ring_road.rviz` 已默认加载以下话题与面板，**无需手动订阅**）：
@@ -106,7 +107,7 @@ ros2 launch self_driving_car_demo ring_road.launch.py map:=1   # 直接倒车入
 - Lattice 局部规划：灰色候选路径 + 绿色选中的最优避障路径（`/simulation/lattice`）
 - 绿色规划路径 + 青色行驶轨迹 + 车顶 3D 状态文本（`/simulation/markers_live`）
 - 360° LIDAR 点云（黄色，`/sensor/lidar`）
-- **SDC HUD 面板**（右侧，`sdc/HudPanel`）：实时显示小车状态，支持暂停/继续、清除轨迹
+- **SDC HUD 面板**（右侧，`sdc/HudPanel`）：实时显示小车状态，切换地图、开始/暂停、开始考试
 
 > 如果使用自定义 RViz 窗口，可手动添加以上话题与面板：
 > - `/simulation/markers`（道路，MarkerArray）
@@ -118,18 +119,29 @@ ros2 launch self_driving_car_demo ring_road.launch.py map:=1   # 直接倒车入
 
 ## 切换地图与科目二考试
 
-仿真内置 4 种场景：**环形道路 / 倒车入库 / 侧方停车 / 直角转弯**。
+仿真内置 **2 张地图**，功能区分清晰：
+
+| 地图 | 功能 | 按钮 | 障碍物 |
+| --- | --- | --- | --- |
+| **1. 环形道路** | 原有环形车道行驶 | 「开始 / 暂停」 | 保留随机障碍避障 |
+| **2. 科目二综合赛道** | 倒车入库 / 侧方停车 / 直角转弯 三个科目**在同一条道路上**依次完成 | 「开始考试」 | 无障碍物 |
 
 **方式一：RViz HUD 面板**（推荐）
-- 右侧 `SDC HUD 面板` 的「地图 / 场景」下拉框，选择即切换；
-- 点「开始考试」按钮：小车自动依次完成 `倒车入库 → 侧方停车 → 直角转弯`，
-  每完成一项在车顶文本与面板显示进度，全部完成提示「考试合格」；
-- 「重置小车」把车放回当前地图起点，「暂停/继续」「清除轨迹」保持不变。
+- 右侧 `SDC HUD 面板` 的「地图」下拉框选择：`环形道路` 或 `科目二综合赛道`
+- 切到**环形道路**：点「开始」/「暂停」控制行驶
+- 切到**科目二综合赛道**：点「开始考试」按钮，小车在同一条赛道上依次完成
+  `倒车入库 → 侧方停车 → 直角转弯`，每完成一项在车顶文本与面板显示进度，
+  全部完成提示「考试合格」
+- 「重置小车」把车放回当前地图起点，「清除轨迹」保持不变
 
 **方式二：话题控制**
 ```bash
-# 切换地图（0=环形 1=倒车入库 2=侧方停车 3=直角转弯）
+# 切换地图（0=环形道路 1=科目二综合赛道）
 ros2 topic pub --once /sdc/set_map std_msgs/msg/Int32 "{data: 1}"
+# 开始行驶（环形道路用）
+ros2 topic pub --once /sdc/start std_msgs/msg/Bool "{data: true}"
+# 暂停/继续行驶
+ros2 topic pub --once /sdc/pause std_msgs/msg/Bool "{data: true}"
 # 开始科目二考试
 ros2 topic pub --once /sdc/start_exam std_msgs/msg/Bool "{data: true}"
 # 重置小车到当前地图起点
@@ -141,8 +153,10 @@ ros2 topic pub --once /sdc/reset_car std_msgs/msg/Bool "{data: true}"
 - `/sdc/exam_progress`（`String`，如「1/3」）
 - `/sdc/exam_item`（`Int32`，当前科目序号，-1=无）
 
-> 实现说明：场景由 `ScenarioMap` 抽象，库位/边界以「障碍物」形式交给现有 Lattice
-> 避障闭环，因此小车不会冲出边界；倒车入库通过阿克曼模型负车速实现倒车。
+> 实现说明：科目二综合赛道（`ExamTrackMap`）把 3 个科目都布置在同一条道路上，
+> 通过「航点」依次推进，**不切换地图**。科目二赛道**无障碍物**（`to_obstacles()`
+> 返回空），车只沿目标点循迹；环形道路才保留随机障碍避障。
+> 倒车入库通过阿克曼模型负车速实现倒车。
 
 ## 切换速度控制算法
 
@@ -175,7 +189,7 @@ cmake .. && make
 - [x] 加入 PID 速度控制（含 Bang-Bang / Ramp 多种算法，可实时切换）
 - [x] 加入局部路径规划避障（Lattice Planner，RViz 可视化候选与最优路径）
 - [x] 随机动态障碍物系统（RViz 实时显示）
-- [x] 可切换地图（环形 / 倒车入库 / 侧方停车 / 直角转弯）
-- [x] 科目二模拟考试（HUD 开始考试，逐项完成并提示）
+- [x] 可切换地图（环形道路 / 科目二综合赛道）
+- [x] 科目二模拟考试（3 个科目在同一条道路上，HUD 开始考试，逐项完成并提示）
 - [ ] 接入真实传感器（超声波 / 激光雷达）数据
 - [ ] 扩展为 Gazebo 物理仿真

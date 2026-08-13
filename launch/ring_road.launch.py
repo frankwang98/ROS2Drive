@@ -1,23 +1,23 @@
 """
-启动自动驾驶仿真（RViz2 可视化，支持地图切换与科目二考试）
+启动自动驾驶仿真（RViz2 可视化，双地图切换 + 科目二考试）
 
 用法：
   ros2 launch self_driving_car_demo ring_road.launch.py
-  ros2 launch self_driving_car_demo ring_road.launch.py map:=1   # 倒车入库
-  ros2 launch self_driving_car_demo ring_road.launch.py map:=2   # 侧方停车
-  ros2 launch self_driving_car_demo ring_road.launch.py map:=3   # 直角转弯
+  ros2 launch self_driving_car_demo ring_road.launch.py map:=1   # 科目二综合赛道
 
-map 取值：0=环形道路 1=倒车入库 2=侧方停车 3=直角转弯
+map 取值：
+  0 = 环形道路（Map 1，HUD 提供「开始 / 暂停」，保留随机障碍避障）
+  1 = 科目二综合赛道（Map 2，倒车入库 / 侧方停车 / 直角转弯 在同一条道路上，
+      HUD 提供「开始考试」，无障碍物）
 """
 
 import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, RegisterEventHandler
+from launch.actions import DeclareLaunchArgument, ExecuteProcess
 from launch.conditions import IfCondition
-from launch.event_handlers import OnProcessExit
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
@@ -33,9 +33,9 @@ def generate_launch_description():
             DeclareLaunchArgument("use_rviz", default_value="true", description="是否启动 RViz2"),
             DeclareLaunchArgument("rviz_config", default_value=default_rviz),
             DeclareLaunchArgument("map", default_value="0",
-                                  description="初始地图: 0=环形 1=倒车入库 2=侧方停车 3=直角转弯"),
+                                  description="初始地图: 0=环形道路 1=科目二综合赛道"),
 
-            # ---------- 环形道路仿真节点 ----------
+            # ---------- 自动驾驶仿真节点 ----------
             Node(
                 package="self_driving_car_demo",
                 executable="ring_road_sim",
