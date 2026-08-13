@@ -57,6 +57,7 @@
 #include "sim/map.hpp"
 
 using namespace std::chrono_literals;
+using namespace sdc;
 
 // ========== 仿真参数 ==========
 constexpr double SIM_DT          = 0.05;   // 仿真步长（秒）
@@ -474,6 +475,7 @@ private:
   AutoDriver driver_;
   ExamManager exam_;
   ObstacleManager obstacle_manager_;
+  LatticePlanner lattice_planner_;
 
   double sim_time_{0.0};
   double road_resend_accum_{0.0};
