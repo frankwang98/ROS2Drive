@@ -55,6 +55,7 @@
 #include "sim/driver.hpp"
 #include "sim/exam.hpp"
 #include "sim/map.hpp"
+#include "sim/obstacle_manager.hpp"
 
 using namespace std::chrono_literals;
 using namespace sdc;
