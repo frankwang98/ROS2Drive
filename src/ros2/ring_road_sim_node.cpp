@@ -226,8 +226,8 @@ private:
         driver_.manual_step(throttle, steer, SIM_DT);
         last_front_dist_ = driver_front_dist();
       } else {
-        // 自动驾驶：目标点为沿环前进的虚拟点
-        Vec2 target = map_->goal_point();
+        // 自动驾驶：目标点为沿环前进的虚拟点（基于小车当前位置持续前移）
+        Vec2 target = map_->goal_point_ahead(driver_.car());
         auto res = driver_.step(target, false, SIM_DT);
         last_front_dist_ = res.front_dist;
         last_action_ = res.action;

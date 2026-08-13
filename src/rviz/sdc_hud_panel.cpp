@@ -186,10 +186,11 @@ void HudPanel::publishManualCmd() {
   double throttle = 0.0;
   if (key_w_) throttle += 1.0;
   if (key_s_) throttle -= 1.0;
-  // 转向：A 左(-1)，D 右(+1)
+  // 转向：A 左(+1)，D 右(-1)
+  // （阿克曼模型 steer>0 => yaw 增大 => 左转，故左=正转角，右=负转角）
   double steer = 0.0;
-  if (key_a_) steer -= 1.0;
-  if (key_d_) steer += 1.0;
+  if (key_a_) steer += 1.0;
+  if (key_d_) steer -= 1.0;
   twist.linear.x = throttle;
   twist.angular.z = steer;
   manual_pub_->publish(twist);
