@@ -27,6 +27,11 @@ class DecisionMaker {
 
   Action decide(double distance) const;
 
+  /// 根据 Lattice 局部路径建议的行车速度输出行为。
+  /// 速度反映「沿选中路径」的障碍物疏密：速度高则畅行，速度低则靠近障碍，
+  /// 用于把「可绕行的障碍」与「真正堵死前路」区分开（后者由调用方判 blocked）。
+  Action decide_by_speed(double speed) const;
+
  private:
   double safe_stop_distance_;
 };

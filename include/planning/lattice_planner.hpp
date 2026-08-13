@@ -23,6 +23,8 @@ struct LatticeTrajectory {
   double lateral_offset = 0.0; // 目标横向偏移（米）
   double cost = 0.0;           // 该轨迹的代价（越小越优）
   double speed = 0.0;          // 建议沿该轨迹行驶的速度（m/s）
+  double clearance = 0.0;      // 沿轨迹到最近障碍物的最小距离（米）
+  bool blocked = false;        // 是否不可通行（路径与障碍物相撞）
   bool selected = false;       // 是否被选为最优轨迹
 };
 
@@ -57,6 +59,9 @@ class LatticePlanner {
   void plan(double pose_x, double pose_y, double yaw,
             const std::vector<Obstacle>& obstacles,
             std::vector<LatticeTrajectory>& out) const;
+
+  /// 规划器的默认最大车速（供上层决策参考）。
+  double max_speed() const { return p_.max_speed; }
 
  private:
   /// 环道上某纵向弧长 s 对应的小车中心点世界坐标。
