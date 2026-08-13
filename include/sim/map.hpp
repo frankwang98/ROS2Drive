@@ -46,6 +46,11 @@ class ScenarioMap {
   /// 当前任务目标点（世界坐标）。自动行驶朝它走。
   virtual Vec2 goal_point(double progress = 0.0) const = 0;
 
+  /// 沿行驶方向的前视目标点（世界坐标）。
+  /// 环形无终点，自动行驶应持续沿环前进，故基于小车当前位置返回一个
+  /// 前方虚拟点（而非固定点），否则车会停在某个固定点不再前进。
+  virtual Vec2 goal_point_ahead(const CarState& car) const { return goal_point(); }
+
   /// 是否已完成当前任务（车抵达目标点附近）。
   virtual bool goal_reached(const CarState& car) const = 0;
 
@@ -85,6 +90,7 @@ class RingMap : public ScenarioMap {
   visualization_msgs::msg::MarkerArray build_extra_markers() const override;
   void reset(CarState& car) const override;
   Vec2 goal_point(double progress = 0.0) const override;
+  Vec2 goal_point_ahead(const CarState& car) const override;
   bool goal_reached(const CarState& car) const override;
   std::vector<Obstacle> to_obstacles() const override;
 

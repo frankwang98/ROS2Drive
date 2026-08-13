@@ -82,6 +82,16 @@ Vec2 RingMap::goal_point(double /*progress*/) const {
   return Vec2{radius_, radius_ * 0.12};
 }
 
+Vec2 RingMap::goal_point_ahead(const CarState& car) const {
+  // 基于小车当前位置计算沿环（逆时针）前方的虚拟目标点：
+  // 取小车当前环向角前方一段弧长处的中心线点，使自动驾驶持续沿环行驶，
+  // 而不是停在一个固定点。
+  double theta = std::atan2(car.y(), car.x());
+  const double lookahead = 6.0;         // 前视弧长（米）
+  double dtheta = lookahead / radius_;  // 对应角度增量
+  return point_on_ring(theta + dtheta);
+}
+
 bool RingMap::goal_reached(const CarState& /*car*/) const {
   return false;  // 环道为无限行驶，不判定完成
 }
