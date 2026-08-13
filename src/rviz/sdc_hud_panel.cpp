@@ -1,5 +1,11 @@
 /**
  * sdc_hud_panel.cpp — 自动驾驶小车 HUD 控制面板实现
+ *
+ * 双地图控制：
+ *   - 地图1「环形道路」：提供「开始 / 暂停」行驶，保留障碍物避障。
+ *   - 地图2「科目二综合赛道」：倒车入库 / 侧方停车 / 直角转弯 三个科目
+ *     在同一条道路上，提供「开始考试」，无障碍物。
+ * 切换地图时，按钮随当前地图动态启用/隐藏。
  */
 
 #include "sdc_hud_panel.hpp"
@@ -22,6 +28,7 @@ HudPanel::HudPanel(QWidget* parent)
     , distance_label_(nullptr)
     , exam_label_(nullptr)
     , map_combo_(nullptr)
+    , start_button_(nullptr)
     , pause_button_(nullptr)
     , clear_button_(nullptr)
     , exam_button_(nullptr)
@@ -42,17 +49,30 @@ HudPanel::HudPanel(QWidget* parent)
   root->addWidget(state_box);
 
   // 地图选择区
-  auto* map_box = new QGroupBox("地图 / 场景", this);
+  auto* map_box = new QGroupBox("地图", this);
   auto* map_layout = new QVBoxLayout(map_box);
   map_combo_ = new QComboBox(map_box);
-  map_combo_->addItem("环形道路");
-  map_combo_->addItem("倒车入库");
-  map_combo_->addItem("侧方停车");
-  map_combo_->addItem("直角转弯");
+  map_combo_->addItem("环形道路");        // 0 = Map 1（开始/暂停）
+  map_combo_->addItem("科目二综合赛道");   // 1 = Map 2（开始考试）
   map_layout->addWidget(map_combo_);
   root->addWidget(map_box);
 
-  // 考试区
+  // 控制区（环形道路：开始 / 暂停）
+  auto* ctrl_box = new QGroupBox("行驶控制", this);
+  auto* ctrl_layout = new QVBoxLayout(ctrl_box);
+  auto* ctrl_row = new QHBoxLayout();
+  start_button_ = new QPushButton("开始", ctrl_box);
+  pause_button_ = new QPushButton("暂停", ctrl_box);
+  clear_button_ = new QPushButton("清除轨迹", ctrl_box);
+  ctrl_row->addWidget(start_button_);
+  ctrl_row->addWidget(pause_button_);
+  ctrl_row->addWidget(clear_button_);
+  ctrl_layout->addLayout(ctrl_row);
+  reset_button_ = new QPushButton("重置小车", ctrl_box);
+  ctrl_layout->addWidget(reset_button_);
+  root->addWidget(ctrl_box);
+
+  // 考试区（科目二综合赛道：开始考试）
   auto* exam_box = new QGroupBox("科目二考试", this);
   auto* exam_layout = new QVBoxLayout(exam_box);
   exam_label_ = new QLabel("考试: 待开始", exam_box);
@@ -61,24 +81,17 @@ HudPanel::HudPanel(QWidget* parent)
   exam_layout->addWidget(exam_button_);
   root->addWidget(exam_box);
 
-  // 控制区
-  auto* ctrl_box = new QGroupBox("控制", this);
-  auto* ctrl_layout = new QHBoxLayout(ctrl_box);
-  pause_button_ = new QPushButton("暂停", ctrl_box);
-  clear_button_ = new QPushButton("清除轨迹", ctrl_box);
-  reset_button_ = new QPushButton("重置小车", ctrl_box);
-  ctrl_layout->addWidget(pause_button_);
-  ctrl_layout->addWidget(clear_button_);
-  ctrl_layout->addWidget(reset_button_);
-  root->addWidget(ctrl_box);
-
   // 信号连接
+  connect(start_button_, &QPushButton::clicked, this, &HudPanel::onStart);
   connect(pause_button_, &QPushButton::clicked, this, &HudPanel::onTogglePause);
   connect(clear_button_, &QPushButton::clicked, this, &HudPanel::onClearTrail);
   connect(reset_button_, &QPushButton::clicked, this, &HudPanel::onResetCar);
   connect(exam_button_, &QPushButton::clicked, this, &HudPanel::onStartExam);
   connect(map_combo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
           this, &HudPanel::onMapChanged);
+
+  // 初始：默认地图 1（环形道路）
+  updateMapUi(0);
 
   // 速度大字体
   QFont font = speed_label_->font();
@@ -105,6 +118,7 @@ void HudPanel::onInitialize() {
   exam_progress_sub_ = node_->create_subscription<std_msgs::msg::String>(
       "sdc/exam_progress", qos, std::bind(&HudPanel::onExamProgress, this, std::placeholders::_1));
 
+  start_pub_ = node_->create_publisher<std_msgs::msg::Bool>("sdc/start", qos);
   pause_pub_ = node_->create_publisher<std_msgs::msg::Bool>("sdc/pause", qos);
   clear_pub_ = node_->create_publisher<std_msgs::msg::Bool>("sdc/clear_trail", qos);
   start_exam_pub_ = node_->create_publisher<std_msgs::msg::Bool>("sdc/start_exam", qos);
@@ -148,6 +162,33 @@ void HudPanel::onStatusTimer() {
   if (pause_button_) pause_button_->setText(paused_ ? "继续" : "暂停");
 }
 
+void HudPanel::updateMapUi(int index) {
+  bool is_exam = (index == 1);  // 1 = 科目二综合赛道
+  // 环形道路：开始 / 暂停
+  start_button_->setVisible(!is_exam);
+  pause_button_->setVisible(!is_exam);
+  // 科目二：开始考试
+  exam_button_->setVisible(is_exam);
+  exam_label_->setVisible(is_exam);
+}
+
+void HudPanel::onMapChanged(int index) {
+  updateMapUi(index);
+  // 重置考试显示
+  exam_status_.clear();
+  exam_progress_.clear();
+  paused_ = false;
+  auto msg = std_msgs::msg::Int32(); msg.data = index;  // 0=环形 1=科目二
+  set_map_pub_->publish(msg);
+}
+
+void HudPanel::onStart() {
+  auto msg = std_msgs::msg::Bool(); msg.data = true;
+  start_pub_->publish(msg);
+  paused_ = false;
+  onStatusTimer();
+}
+
 void HudPanel::onTogglePause() {
   paused_ = !paused_;
   auto msg = std_msgs::msg::Bool(); msg.data = paused_;
@@ -168,14 +209,6 @@ void HudPanel::onResetCar() {
 void HudPanel::onStartExam() {
   auto msg = std_msgs::msg::Bool(); msg.data = true;
   start_exam_pub_->publish(msg);
-}
-
-void HudPanel::onMapChanged(int index) {
-  auto msg = std_msgs::msg::Int32(); msg.data = index;  // 0=环形 1=倒车入库 ...
-  set_map_pub_->publish(msg);
-  // 切地图会自动重置考试，按钮文案复位
-  exam_status_.clear();
-  exam_progress_.clear();
 }
 
 void HudPanel::load(const rviz_common::Config& config) { Panel::load(config); }

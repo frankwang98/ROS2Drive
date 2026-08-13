@@ -18,24 +18,24 @@ namespace sdc {
 using CarState = AckermannModel;
 
 /// 地图类型枚举（与 HUD 下拉、/sdc/set_map 话题一致）。
+///
+/// 仅 2 张地图：
+///   - kRing      环形道路：原有功能，HUD 提供「开始 / 暂停」，保留随机障碍避障。
+///   - kExamTrack 科目二综合赛道：倒车入库 / 侧方停车 / 直角转弯 三个科目
+///                都布置在同一条道路上，HUD 提供「开始考试」，**无障碍物**。
 enum class MapType {
-  kRing = 0,           // 环形道路（原有场景）
-  kReverseParking,     // 倒车入库
-  kSideParking,        // 侧方停车
-  kRightAngleTurn,     // 直角转弯
+  kRing = 0,       // 环形道路（开始 / 暂停）
+  kExamTrack = 1,  // 科目二综合赛道（开始考试）
 };
 
 const char* map_type_name(MapType t);
-const char* map_type_label(MapType t);  // 中文短名（库位标签用）
+const char* map_type_label(MapType t);  // 中文短名（下拉 / 库位标签用）
 
 /// 场景地图抽象基类。
 ///
-/// 把"场景布局 / 起点终点 / 完成判定 / 障碍物"从仿真节点中抽离出来，
+/// 把「场景布局 / 起点终点 / 完成判定 / 障碍物」从仿真节点中抽离出来，
 /// 让仿真节点只负责「感知→规划→控制→可视化」的闭环，地图只负责「画什么、
 /// 车从哪出发、到哪算完成、边界墙当障碍物」。
-///
-/// 关键设计：所有场景的边界（车道线、库位框、围墙）都以「障碍物」形式
-/// 暴露给 Lattice 规划器，从而**复用现有避障闭环**，小车不会被开出界外。
 class ScenarioMap {
  public:
   virtual ~ScenarioMap() = default;
@@ -50,7 +50,6 @@ class ScenarioMap {
   virtual void reset(CarState& car) const = 0;
 
   /// 当前任务目标点（世界坐标）。考试/自动行驶都朝它走。
-  /// @param progress 0..1 任务进度（用于断点续行，默认 0）
   virtual Vec2 goal_point(double progress = 0.0) const = 0;
 
   /// 是否已完成当前任务（车抵达目标点附近）。
@@ -64,6 +63,12 @@ class ScenarioMap {
     return visualization_msgs::msg::MarkerArray{};
   }
 
+  // ---- 航点控制（科目二赛道用，其它地图返回默认值） ----
+  /// 当前航点是否允许倒车（仅科目二赛道有意义）。
+  virtual bool current_allow_reverse() const { return false; }
+  /// 推进到下一航点；跨越站点边界返回 true（表示一个科目完成）。
+  virtual bool advance() { return false; }
+
   // ---- 通用工具 ----
   static geometry_msgs::msg::Point make_point(double x, double y, double z = 0.0);
 
@@ -75,7 +80,7 @@ class ScenarioMap {
       double radius, double step);
 };
 
-/// 环形道路场景（原有逻辑平滑迁移）。
+/// 环形道路场景（原有逻辑迁移，保留随机障碍避障 + 开始/暂停）。
 class RingMap : public ScenarioMap {
  public:
   RingMap(double radius = 25.0, double road_width = 6.0);
@@ -96,72 +101,67 @@ class RingMap : public ScenarioMap {
   int segments_ = 200;
 };
 
-/// 倒车入库场景。
-class ReverseParkingMap : public ScenarioMap {
+/// 科目二综合赛道场景。
+///
+/// 「一条道路」上依次布置 3 个科目站点：
+///   1. 倒车入库  2. 侧方停车  3. 直角转弯
+/// 赛道是一条横向主路（y∈[-4,4]），车从左侧进入，沿道路向东行驶；
+/// 每个站点在路边设有库位/弯道，车驶入完成该科目后回到主路继续前进。
+///
+/// 无障碍物：本场景 to_obstacles() 返回空，车只沿目标点循迹行驶，
+/// 不参与随机障碍避障。
+///
+/// 行驶通过一系列「航点」推进：车依次到达各航点，到达当前航点后
+/// 由外部调用 advance() 进入下一个航点；跨越站点边界时置站点完成标记，
+/// 供 ExamManager 推进到下一个科目。
+class ExamTrackMap : public ScenarioMap {
  public:
-  ReverseParkingMap();
+  /// 单个行驶航点。
+  struct Waypoint {
+    Vec2 pos;              // 世界坐标目标点
+    bool allow_reverse;    // 是否允许倒车（倒车入库 / 出库时用）
+  };
 
-  std::string name() const override { return "倒车入库"; }
+  ExamTrackMap();
+
+  std::string name() const override { return "科目二综合赛道"; }
+
   visualization_msgs::msg::MarkerArray build_road_markers() const override;
   visualization_msgs::msg::MarkerArray build_extra_markers() const override;
   void reset(CarState& car) const override;
   Vec2 goal_point(double progress = 0.0) const override;
   bool goal_reached(const CarState& car) const override;
-  std::vector<Obstacle> to_obstacles() const override;
+  std::vector<Obstacle> to_obstacles() const override { return {}; }  // 无障碍物
+
+  // ---- 站点 / 航点控制（供仿真节点驱动考试流程） ----
+  /// 当前航点索引。
+  int current_waypoint() const { return current_wp_; }
+  /// 当前航点是否允许倒车。
+  bool current_allow_reverse() const;
+  /// 当前航点所属站点（0=倒车入库 1=侧方停车 2=直角转弯）。
+  int current_station() const;
+  /// 站点总数（3）。
+  int station_count() const { return 3; }
+  /// 推进到下一个航点；若跨越站点边界则返回 true（表示一个科目完成）。
+  /// @return 是否刚完成一个站点（需要 ExamManager 推进到下一个科目）
+  bool advance();
+  /// 把航点/车重置到某站点的起点（exam 开始时或切到下一科目时调用）。
+  void reset_to_station(int station);
+  /// 获取某站点名称。
+  static const char* station_name(int station);
 
  private:
-  // 库位（矩形）参数
-  double bay_cx_ = 0.0;    // 库中心 x
-  double bay_cy_ = -12.0;  // 库中心 y
-  double bay_w_ = 6.0;     // 库宽（沿 x）
-  double bay_h_ = 8.0;     // 库深（沿 y）
-  double start_x_ = 0.0;   // 起始位（库右前方）
-  double start_y_ = -2.0;
-  double goal_tol_ = 1.4;  // 完成容差（米）
-};
+  // 站点边界（航点下标区间）。站点 i 的航点范围是 [station_start_[i], station_start_[i+1])
+  std::array<int, 4> station_start_{0, 3, 6, 8};
 
-/// 侧方停车场景。
-class SideParkingMap : public ScenarioMap {
- public:
-  SideParkingMap();
+  std::vector<Waypoint> waypoints_;
+  int current_wp_{0};
 
-  std::string name() const override { return "侧方停车"; }
-  visualization_msgs::msg::MarkerArray build_road_markers() const override;
-  visualization_msgs::msg::MarkerArray build_extra_markers() const override;
-  void reset(CarState& car) const override;
-  Vec2 goal_point(double progress = 0.0) const override;
-  bool goal_reached(const CarState& car) const override;
-  std::vector<Obstacle> to_obstacles() const override;
-
- private:
-  double bay_cx_ = 0.0;    // 库中心 x
-  double bay_cy_ = -12.0;  // 库中心 y
-  double bay_w_ = 8.0;     // 库长（沿 x）
-  double bay_h_ = 3.2;     // 库宽（沿 y）
-  double start_x_ = 0.0;
-  double start_y_ = -6.0;
-  double goal_tol_ = 1.4;
-};
-
-/// 直角转弯场景。
-class RightAngleTurnMap : public ScenarioMap {
- public:
-  RightAngleTurnMap();
-
-  std::string name() const override { return "直角转弯"; }
-  visualization_msgs::msg::MarkerArray build_road_markers() const override;
-  void reset(CarState& car) const override;
-  Vec2 goal_point(double progress = 0.0) const override;
-  bool goal_reached(const CarState& car) const override;
-  std::vector<Obstacle> to_obstacles() const override;
-
- private:
-  // 一条 L 形道路：横段（y∈[-3,0]）与竖段（x∈[0,3]）交汇于原点拐角
-  double road_w_ = 6.0;   // 路宽
-  double len_ = 30.0;     // 每段长度
-  double start_x_ = -24.0;
-  double start_y_ = -3.0;
-  double goal_tol_ = 2.0;
+  // 主路几何参数
+  static constexpr double ROAD_TOP_ = 4.0;    // 主路上边界 y
+  static constexpr double ROAD_BOTTOM_ = -4.0; // 主路下边界 y
+  static constexpr double ROAD_LEFT_ = -26.0;  // 主路左端 x
+  static constexpr double ROAD_RIGHT_ = 24.0;  // 主路右端 x
 };
 
 /// 工厂：根据类型创建地图。

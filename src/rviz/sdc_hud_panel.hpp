@@ -3,9 +3,10 @@
  *
  * 功能：
  *   - 实时显示 速度 / 行为 / 前方距离
- *   - 切换地图（环形 / 倒车入库 / 侧方停车 / 直角转弯）
- *   - 开始科目二考试、重置小车
- *   - 暂停 / 继续 仿真、清除行驶轨迹
+ *   - 切换地图（环形道路 / 科目二综合赛道）
+ *   - 地图1「环形道路」：开始 / 暂停 行驶
+ *   - 地图2「科目二综合赛道」：开始考试（3 个科目在同一条道路上）
+ *   - 暂停 / 继续 仿真、清除行驶轨迹、重置小车
  *   - 显示考试状态与进度
  *
  * 通过 pluginlib 注册为 rviz_common::Panel，在 RViz 中：
@@ -45,6 +46,7 @@ class HudPanel : public rviz_common::Panel {
   void save(rviz_common::Config config) const override;
 
  private Q_SLOTS:
+  void onStart();
   void onTogglePause();
   void onClearTrail();
   void onStartExam();
@@ -59,6 +61,9 @@ class HudPanel : public rviz_common::Panel {
   void onExamStatus(const std_msgs::msg::String::SharedPtr msg);
   void onExamProgress(const std_msgs::msg::String::SharedPtr msg);
 
+  /// 根据地图切换按钮显示（环形=开始/暂停，科目二=开始考试）。
+  void updateMapUi(int index);
+
   // ---- 状态显示 ----
   QLabel* speed_label_;
   QLabel* action_label_;
@@ -69,6 +74,7 @@ class HudPanel : public rviz_common::Panel {
   QComboBox* map_combo_;
 
   // ---- 控制按钮 ----
+  QPushButton* start_button_;
   QPushButton* pause_button_;
   QPushButton* clear_button_;
   QPushButton* exam_button_;
@@ -85,6 +91,7 @@ class HudPanel : public rviz_common::Panel {
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr exam_status_sub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr exam_progress_sub_;
 
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr start_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pause_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr clear_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr start_exam_pub_;
