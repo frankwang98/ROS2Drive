@@ -17,19 +17,13 @@ namespace sdc {
 /// 小车状态（由阿克曼模型提供）。
 using CarState = AckermannModel;
 
-/// 地图类型枚举（与 HUD 下拉、/sdc/set_map 话题一致）。
-///
-/// 仅 2 张地图：
-///   - kRing      环形道路：原有功能，HUD 提供「开始 / 暂停」，保留随机障碍避障。
-///   - kExamTrack 科目二综合赛道：倒车入库 / 侧方停车 / 直角转弯 三个科目
-///                都布置在同一条道路上，HUD 提供「开始考试」，**无障碍物**。
+/// 地图类型枚举（保留环形道路，去掉科目二）。
 enum class MapType {
-  kRing = 0,       // 环形道路（开始 / 暂停）
-  kExamTrack = 1,  // 科目二综合赛道（开始考试）
+  kRing = 0,       // 环形道路（自动 / 手动驾驶）
 };
 
 const char* map_type_name(MapType t);
-const char* map_type_label(MapType t);  // 中文短名（下拉 / 库位标签用）
+const char* map_type_label(MapType t);  // 中文短名
 
 /// 场景地图抽象基类。
 ///
@@ -43,31 +37,25 @@ class ScenarioMap {
   /// 场景名称。
   virtual std::string name() const = 0;
 
-  /// 构建静态场景（车道线、库位框、起点/终点标记），返回 Marker 列表。
+  /// 构建静态场景（车道线、路型、复杂路况标记），返回 Marker 列表。
   virtual visualization_msgs::msg::MarkerArray build_road_markers() const = 0;
 
   /// 把车重置到本场景起点，并设置初始朝向。
   virtual void reset(CarState& car) const = 0;
 
-  /// 当前任务目标点（世界坐标）。考试/自动行驶都朝它走。
+  /// 当前任务目标点（世界坐标）。自动行驶朝它走。
   virtual Vec2 goal_point(double progress = 0.0) const = 0;
 
   /// 是否已完成当前任务（车抵达目标点附近）。
   virtual bool goal_reached(const CarState& car) const = 0;
 
-  /// 边界 / 库位边线 作为障碍物（供 Lattice 避障用）。
+  /// 边界 / 复杂路型（slalom、窄门、路障）作为障碍物（供 Lattice 避障用）。
   virtual std::vector<Obstacle> to_obstacles() const = 0;
 
-  /// 场景特有的可视信息（如库位编号文字），默认空。
+  /// 场景特有的可视信息（如路况标识文字），默认空。
   virtual visualization_msgs::msg::MarkerArray build_extra_markers() const {
     return visualization_msgs::msg::MarkerArray{};
   }
-
-  // ---- 航点控制（科目二赛道用，其它地图返回默认值） ----
-  /// 当前航点是否允许倒车（仅科目二赛道有意义）。
-  virtual bool current_allow_reverse() const { return false; }
-  /// 推进到下一航点；跨越站点边界返回 true（表示一个科目完成）。
-  virtual bool advance() { return false; }
 
   // ---- 通用工具 ----
   static geometry_msgs::msg::Point make_point(double x, double y, double z = 0.0);
@@ -80,13 +68,21 @@ class ScenarioMap {
       double radius, double step);
 };
 
-/// 环形道路场景（原有逻辑迁移，保留随机障碍避障 + 开始/暂停）。
+/// 环形道路场景。
+///
+/// 在基础环形跑道基础上增加道路复杂性：
+///   - 加宽道路，提供更多横向变道空间
+///   - 「S 形绕桩」路段：一排交替内/外侧的桩桶，自动驾驶需蛇形穿梭
+///   - 「窄门」路段：两侧收窄形成门形通道，考验居中控制
+///   - 多处路面标线（车道线、人行横道、减速带）增强视觉复杂度
+///   - 保留随机动态障碍物避障（由 ObstacleManager 注入）
 class RingMap : public ScenarioMap {
  public:
-  RingMap(double radius = 25.0, double road_width = 6.0);
+  RingMap(double radius = 26.0, double road_width = 9.0);
 
   std::string name() const override { return "环形道路"; }
   visualization_msgs::msg::MarkerArray build_road_markers() const override;
+  visualization_msgs::msg::MarkerArray build_extra_markers() const override;
   void reset(CarState& car) const override;
   Vec2 goal_point(double progress = 0.0) const override;
   bool goal_reached(const CarState& car) const override;
@@ -96,72 +92,14 @@ class RingMap : public ScenarioMap {
   double road_width() const { return road_width_; }
 
  private:
+  /// 计算环道上某角度处的中心线点（世界坐标）。
+  Vec2 point_on_ring(double angle) const;
+  /// 计算环道上某角度 + 横向偏移（米，向内为负 / 向外为正）的点。
+  Vec2 point_on_ring(double angle, double lateral) const;
+
   double radius_;
   double road_width_;
   int segments_ = 200;
-};
-
-/// 科目二综合赛道场景。
-///
-/// 「一条道路」上依次布置 3 个科目站点：
-///   1. 倒车入库  2. 侧方停车  3. 直角转弯
-/// 赛道是一条横向主路（y∈[-4,4]），车从左侧进入，沿道路向东行驶；
-/// 每个站点在路边设有库位/弯道，车驶入完成该科目后回到主路继续前进。
-///
-/// 无障碍物：本场景 to_obstacles() 返回空，车只沿目标点循迹行驶，
-/// 不参与随机障碍避障。
-///
-/// 行驶通过一系列「航点」推进：车依次到达各航点，到达当前航点后
-/// 由外部调用 advance() 进入下一个航点；跨越站点边界时置站点完成标记，
-/// 供 ExamManager 推进到下一个科目。
-class ExamTrackMap : public ScenarioMap {
- public:
-  /// 单个行驶航点。
-  struct Waypoint {
-    Vec2 pos;              // 世界坐标目标点
-    bool allow_reverse;    // 是否允许倒车（倒车入库 / 出库时用）
-  };
-
-  ExamTrackMap();
-
-  std::string name() const override { return "科目二综合赛道"; }
-
-  visualization_msgs::msg::MarkerArray build_road_markers() const override;
-  visualization_msgs::msg::MarkerArray build_extra_markers() const override;
-  void reset(CarState& car) const override;
-  Vec2 goal_point(double progress = 0.0) const override;
-  bool goal_reached(const CarState& car) const override;
-  std::vector<Obstacle> to_obstacles() const override { return {}; }  // 无障碍物
-
-  // ---- 站点 / 航点控制（供仿真节点驱动考试流程） ----
-  /// 当前航点索引。
-  int current_waypoint() const { return current_wp_; }
-  /// 当前航点是否允许倒车。
-  bool current_allow_reverse() const;
-  /// 当前航点所属站点（0=倒车入库 1=侧方停车 2=直角转弯）。
-  int current_station() const;
-  /// 站点总数（3）。
-  int station_count() const { return 3; }
-  /// 推进到下一个航点；若跨越站点边界则返回 true（表示一个科目完成）。
-  /// @return 是否刚完成一个站点（需要 ExamManager 推进到下一个科目）
-  bool advance();
-  /// 把航点/车重置到某站点的起点（exam 开始时或切到下一科目时调用）。
-  void reset_to_station(int station);
-  /// 获取某站点名称。
-  static const char* station_name(int station);
-
- private:
-  // 站点边界（航点下标区间）。站点 i 的航点范围是 [station_start_[i], station_start_[i+1])
-  std::array<int, 4> station_start_{0, 3, 6, 8};
-
-  std::vector<Waypoint> waypoints_;
-  int current_wp_{0};
-
-  // 主路几何参数
-  static constexpr double ROAD_TOP_ = 4.0;    // 主路上边界 y
-  static constexpr double ROAD_BOTTOM_ = -4.0; // 主路下边界 y
-  static constexpr double ROAD_LEFT_ = -26.0;  // 主路左端 x
-  static constexpr double ROAD_RIGHT_ = 24.0;  // 主路右端 x
 };
 
 /// 工厂：根据类型创建地图。

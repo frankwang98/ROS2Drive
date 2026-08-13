@@ -31,6 +31,9 @@
             ros2 topic list | grep -q /sensor/lidar
             ros2 topic list | grep -q /sdc/speed
             ros2 topic list | grep -q /sdc/control_algo
+            ros2 topic list | grep -q /sdc/mode
+            ros2 topic list | grep -q /sdc/set_mode
+            ros2 topic list | grep -q /sdc/manual_cmd
             echo "smoke test passed"
   pull_request:
     - name: ros2-build

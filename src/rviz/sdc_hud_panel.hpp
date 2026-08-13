@@ -2,12 +2,10 @@
  * sdc_hud_panel.hpp — 自动驾驶小车 HUD 控制面板（RViz 自定义 Panel）
  *
  * 功能：
- *   - 实时显示 速度 / 行为 / 前方距离
- *   - 切换地图（环形道路 / 科目二综合赛道）
- *   - 地图1「环形道路」：开始 / 暂停 行驶
- *   - 地图2「科目二综合赛道」：开始考试（3 个科目在同一条道路上）
- *   - 暂停 / 继续 仿真、清除行驶轨迹、重置小车
- *   - 显示考试状态与进度
+ *   - 实时显示 速度 / 行为 / 前方距离 / 驾驶模式
+ *   - 自动 / 手动驾驶模式切换
+ *   - 手动模式下支持 WASD 键盘控制（W=前进 S=倒车 A=左转 D=右转）
+ *   - 开始 / 暂停 行驶、清除行驶轨迹、重置小车
  *
  * 通过 pluginlib 注册为 rviz_common::Panel，在 RViz 中：
  *   Panels -> Add -> New panel -> sdc/HudPanel
@@ -24,13 +22,14 @@
 #include <QPushButton>
 #include <QComboBox>
 #include <QTimer>
+#include <QKeyEvent>
 
 #include <rclcpp/rclcpp.hpp>
 #include <rviz_common/panel.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/float64.hpp>
 #include <std_msgs/msg/int32.hpp>
-#include <std_msgs/msg/string.hpp>
+#include <geometry_msgs/msg/twist.hpp>
 
 namespace sdc {
 
@@ -45,39 +44,40 @@ class HudPanel : public rviz_common::Panel {
   void load(const rviz_common::Config& config) override;
   void save(rviz_common::Config config) const override;
 
+ protected:
+  void keyPressEvent(QKeyEvent* event) override;
+  void keyReleaseEvent(QKeyEvent* event) override;
+
  private Q_SLOTS:
   void onStart();
   void onTogglePause();
   void onClearTrail();
-  void onStartExam();
+  void onToggleMode();
   void onResetCar();
-  void onMapChanged(int index);
   void onStatusTimer();
 
  private:
   void onSpeed(const std_msgs::msg::Float64::SharedPtr msg);
   void onAction(const std_msgs::msg::Float64::SharedPtr msg);
   void onDistance(const std_msgs::msg::Float64::SharedPtr msg);
-  void onExamStatus(const std_msgs::msg::String::SharedPtr msg);
-  void onExamProgress(const std_msgs::msg::String::SharedPtr msg);
+  void onMode(const std_msgs::msg::Int32::SharedPtr msg);
 
-  /// 根据地图切换按钮显示（环形=开始/暂停，科目二=开始考试）。
-  void updateMapUi(int index);
+  /// 发送当前手动指令（WASD 键位组合）。
+  void publishManualCmd();
+  /// 更新手动控制键位状态（按下/松开）。
+  void updateKey(int key, bool pressed);
 
   // ---- 状态显示 ----
   QLabel* speed_label_;
   QLabel* action_label_;
   QLabel* distance_label_;
-  QLabel* exam_label_;
-
-  // ---- 地图选择 ----
-  QComboBox* map_combo_;
+  QLabel* mode_label_;
 
   // ---- 控制按钮 ----
   QPushButton* start_button_;
   QPushButton* pause_button_;
   QPushButton* clear_button_;
-  QPushButton* exam_button_;
+  QPushButton* mode_button_;
   QPushButton* reset_button_;
 
   // ---- UI 定时器 ----
@@ -88,22 +88,27 @@ class HudPanel : public rviz_common::Panel {
   rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr speed_sub_;
   rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr action_sub_;
   rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr distance_sub_;
-  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr exam_status_sub_;
-  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr exam_progress_sub_;
+  rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr mode_sub_;
 
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr start_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pause_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr clear_pub_;
-  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr start_exam_pub_;
+  rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr set_mode_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr reset_pub_;
-  rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr set_map_pub_;
+  rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr manual_pub_;
 
+  // ---- 驾驶状态 ----
   bool   paused_{false};
+  bool   manual_{false};        // 当前是否为手动模式
   double speed_{0.0};
   double distance_{0.0};
   int    action_id_{0};
-  std::string exam_status_;
-  std::string exam_progress_;
+
+  // WASD 键位状态
+  bool key_w_{false};  // 前进
+  bool key_s_{false};  // 倒车
+  bool key_a_{false};  // 左转
+  bool key_d_{false};  // 右转
 };
 
 }  // namespace sdc
