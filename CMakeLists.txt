@@ -43,6 +43,9 @@ add_library(sdc_core STATIC
   src/model/ackermann_model.cpp
   src/planning/lattice_planner.cpp
   src/sim/obstacle_manager.cpp
+  src/sim/map.cpp
+  src/sim/driver.cpp
+  src/sim/exam.cpp
   src/car/car.cpp
 )
 target_include_directories(sdc_core PUBLIC

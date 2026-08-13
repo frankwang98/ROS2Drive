@@ -1,8 +1,13 @@
 """
-启动环形道路仿真（RViz2 可视化）
+启动自动驾驶仿真（RViz2 可视化，支持地图切换与科目二考试）
 
 用法：
   ros2 launch self_driving_car_demo ring_road.launch.py
+  ros2 launch self_driving_car_demo ring_road.launch.py map:=1   # 倒车入库
+  ros2 launch self_driving_car_demo ring_road.launch.py map:=2   # 侧方停车
+  ros2 launch self_driving_car_demo ring_road.launch.py map:=3   # 直角转弯
+
+map 取值：0=环形道路 1=倒车入库 2=侧方停车 3=直角转弯
 """
 
 import os
@@ -27,6 +32,8 @@ def generate_launch_description():
             # ---------- 可选参数 ----------
             DeclareLaunchArgument("use_rviz", default_value="true", description="是否启动 RViz2"),
             DeclareLaunchArgument("rviz_config", default_value=default_rviz),
+            DeclareLaunchArgument("map", default_value="0",
+                                  description="初始地图: 0=环形 1=倒车入库 2=侧方停车 3=直角转弯"),
 
             # ---------- 环形道路仿真节点 ----------
             Node(
@@ -34,7 +41,7 @@ def generate_launch_description():
                 executable="ring_road_sim",
                 name="ring_road_sim",
                 output="screen",
-                parameters=[],
+                parameters=[{"initial_map": LaunchConfiguration("map")}],
             ),
 
             # ---------- RViz2 ----------

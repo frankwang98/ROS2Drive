@@ -93,8 +93,10 @@ source /opt/ros/humble/setup.bash
 colcon build --packages-select self_driving_car_demo
 source install/setup.bash
 
-# 3. 启动环形道路仿真（自动拉起 RViz2）
+# 3. 启动仿真（自动拉起 RViz2）。可用 map 参数指定初始地图：
+#     0=环形道路 1=倒车入库 2=侧方停车 3=直角转弯
 ros2 launch self_driving_car_demo ring_road.launch.py
+ros2 launch self_driving_car_demo ring_road.launch.py map:=1   # 直接倒车入库
 ```
 
 启动后即可在 RViz2 中看到（`ring_road.rviz` 已默认加载以下话题与面板，**无需手动订阅**）：
@@ -113,6 +115,34 @@ ros2 launch self_driving_car_demo ring_road.launch.py
 > - `/simulation/markers_live`（小车/路径/轨迹/文本）
 > - `/sensor/lidar`（LIDAR 点云）
 > - 面板：`Panels → Add → New panel → sdc/HudPanel`
+
+## 切换地图与科目二考试
+
+仿真内置 4 种场景：**环形道路 / 倒车入库 / 侧方停车 / 直角转弯**。
+
+**方式一：RViz HUD 面板**（推荐）
+- 右侧 `SDC HUD 面板` 的「地图 / 场景」下拉框，选择即切换；
+- 点「开始考试」按钮：小车自动依次完成 `倒车入库 → 侧方停车 → 直角转弯`，
+  每完成一项在车顶文本与面板显示进度，全部完成提示「考试合格」；
+- 「重置小车」把车放回当前地图起点，「暂停/继续」「清除轨迹」保持不变。
+
+**方式二：话题控制**
+```bash
+# 切换地图（0=环形 1=倒车入库 2=侧方停车 3=直角转弯）
+ros2 topic pub --once /sdc/set_map std_msgs/msg/Int32 "{data: 1}"
+# 开始科目二考试
+ros2 topic pub --once /sdc/start_exam std_msgs/msg/Bool "{data: true}"
+# 重置小车到当前地图起点
+ros2 topic pub --once /sdc/reset_car std_msgs/msg/Bool "{data: true}"
+```
+
+考试状态可通过话题查看：
+- `/sdc/exam_status`（`String`，如「考试合格！全部科目完成」）
+- `/sdc/exam_progress`（`String`，如「1/3」）
+- `/sdc/exam_item`（`Int32`，当前科目序号，-1=无）
+
+> 实现说明：场景由 `ScenarioMap` 抽象，库位/边界以「障碍物」形式交给现有 Lattice
+> 避障闭环，因此小车不会冲出边界；倒车入库通过阿克曼模型负车速实现倒车。
 
 ## 切换速度控制算法
 
@@ -145,5 +175,7 @@ cmake .. && make
 - [x] 加入 PID 速度控制（含 Bang-Bang / Ramp 多种算法，可实时切换）
 - [x] 加入局部路径规划避障（Lattice Planner，RViz 可视化候选与最优路径）
 - [x] 随机动态障碍物系统（RViz 实时显示）
+- [x] 可切换地图（环形 / 倒车入库 / 侧方停车 / 直角转弯）
+- [x] 科目二模拟考试（HUD 开始考试，逐项完成并提示）
 - [ ] 接入真实传感器（超声波 / 激光雷达）数据
 - [ ] 扩展为 Gazebo 物理仿真
