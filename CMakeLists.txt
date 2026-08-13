@@ -51,6 +51,12 @@ add_library(sdc_core STATIC
 target_include_directories(sdc_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+# map.cpp / map.hpp 依赖 visualization_msgs 与 geometry_msgs，
+# 必须把对应 ROS 包的头文件路径传给 sdc_core（否则 colcon 找不到相关头文件）。
+ament_target_dependencies(sdc_core
+  visualization_msgs
+  geometry_msgs
+)
 
 # ---- 旧版单机 demo（保留，方便对比）----
 add_executable(demo_car
