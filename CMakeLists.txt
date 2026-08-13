@@ -45,7 +45,6 @@ add_library(sdc_core STATIC
   src/sim/obstacle_manager.cpp
   src/sim/map.cpp
   src/sim/driver.cpp
-  src/sim/exam.cpp
   src/car/car.cpp
 )
 target_include_directories(sdc_core PUBLIC
@@ -117,6 +116,7 @@ if(SDC_BUILD_RVIZ_PANEL)
   ament_target_dependencies(sdc_hud_panel
     rclcpp
     std_msgs
+    geometry_msgs
     rviz_common
   )
   target_compile_definitions(sdc_hud_panel PRIVATE QT_NO_KEYWORDS)

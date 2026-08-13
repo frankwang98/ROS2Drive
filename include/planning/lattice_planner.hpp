@@ -36,7 +36,7 @@ struct LatticeParams {
   double lateral_cost_gain = 1.5;    // 横向偏移代价增益
   double obstacle_safe_dist = 2.0;   // 期望与障碍物的安全距离（米）
   double max_speed = 3.0;     // 默认最大速度
-  double ring_radius = 25.0;  // 环道半径（用于坐标换算）
+  double ring_radius = 26.0;  // 环道半径（用于坐标换算）
 };
 
 /// 基于 lattice 采样的局部规划避障器。

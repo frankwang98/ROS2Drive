@@ -1,36 +1,35 @@
 /**
- * ring_road_sim_node.cpp — 双地图自动驾驶仿真节点
+ * ring_road_sim_node.cpp — 环形道路自动驾驶仿真节点
  *
- * 在「可切换场景」基础上按需求收敛为 **2 张地图**：
- *   1. 环形道路（Map 1）：原有功能，HUD 提供「开始 / 暂停」，保留随机障碍避障。
- *   2. 科目二综合赛道（Map 2）：倒车入库 / 侧方停车 / 直角转弯 三个科目
- *      都布置在同一条道路上，HUD 提供「开始考试」，**无障碍物**。
- *
- * 自动驾驶闭环（感知→Lattice 避障→决策→速度→Stanley→阿克曼）封装到 AutoDriver。
- * 科目二考试由 ExamManager + ExamTrackMap 编排：在同一条赛道内按站点
- * （倒车入库 → 侧方停车 → 直角转弯）推进，不再切换地图。
+ * 单张「环形道路」地图，在基础环形基础上增加了道路复杂性（S 形绕桩、
+ * 窄门、减速带、多车道标线等），并支持 **自动 / 手动** 两种驾驶模式：
+ *   - 自动驾驶：感知 → Lattice 避障 → 决策 → 速度 → Stanley → 阿克曼
+ *   - 手动驾驶：通过 WASD 键盘直接控制（W/S 油门/倒车，A/D 转向）
  *
  * 功能：
- *   1. RViz2 Marker 绘制当前地图（环形 / 科目二综合赛道）
+ *   1. RViz2 Marker 绘制环形道路（含复杂路况）
  *   2. Lattice 局部规划避障并可视化候选/最优路径
- *   3. PID / Bang-Bang / Ramp 速度控制算法（话题可切换）
- *   4. 环形地图「开始 / 暂停」行驶；科目二地图「开始考试」
- *   5. TF / LIDAR / 状态文本等可视化
+ *   3. PID / Bang-Bang / Ramp 速度控制算法（自动模式，话题可切换）
+ *   4. 自动/手动驾驶模式切换（HUD 面板或话题）
+ *   5. 随机动态障碍物 + 静态复杂路况避障
+ *   6. TF / LIDAR / 状态文本等可视化
  *
- * 新增话题：
+ * 话题：
  *   订阅：
- *     /sdc/set_map      (Int32)  切换地图 0=环形道路 1=科目二综合赛道
- *     /sdc/start_exam   (Bool)   开始科目二考试（true 开始）
- *     /sdc/start        (Bool)   开始行驶（环形地图用）
- *     /sdc/pause        (Bool)   暂停/继续行驶
- *     /sdc/reset_car    (Bool)   把车放回当前地图起点
- *     /sdc/clear_trail  (Bool)   清除轨迹
- *     /sdc/control_algo (Int32)  切换速度控制算法
+ *     /sdc/set_mode       (Int32)  0=自动驾驶 1=手动驾驶
+ *     /sdc/manual_cmd     (Twist)  手动指令（linear.x=油门 -1..1，angular.z=转向 -1..1）
+ *     /sdc/start          (Bool)   开始行驶（自动）
+ *     /sdc/pause          (Bool)   暂停/继续行驶
+ *     /sdc/reset_car      (Bool)   把车放回环形起点
+ *     /sdc/clear_trail    (Bool)   清除轨迹
+ *     /sdc/control_algo   (Int32)  切换速度控制算法（自动）
  *   发布：
- *     /sdc/exam_status  (String) 考试状态文本
- *     /sdc/exam_item    (Int32)  当前科目序号（-1=无）
- *     /sdc/exam_progress(String)  进度文本 如 "1/3 倒车入库"
- *     （其余 HUD 话题保持原样：speed / action_id / front_distance / obstacle_count）
+ *     /sdc/speed          (Float64) 当前车速
+ *     /sdc/action_id      (Float64) 行为ID
+ *     /sdc/front_distance (Float64) 前方最近障碍距离
+ *     /sdc/obstacle_count (Float64) 动态障碍数量
+ *     /sdc/mode           (Int32)   当前驾驶模式
+ *     （其余 HUD 话题保持原样）
  */
 
 #include <chrono>
@@ -47,18 +46,17 @@
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <geometry_msgs/msg/point.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
+#include <geometry_msgs/msg/twist.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/float64.hpp>
 #include <std_msgs/msg/int32.hpp>
-#include <std_msgs/msg/string.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 
 #include "control/velocity_controller.hpp"
 #include "planning/lattice_planner.hpp"
 #include "sim/driver.hpp"
-#include "sim/exam.hpp"
 #include "sim/map.hpp"
 #include "sim/obstacle_manager.hpp"
 
@@ -81,10 +79,6 @@ static geometry_msgs::msg::Point make_point(double x, double y, double z = 0.0) 
   return p;
 }
 
-static MapType map_type_from_int(int v) {
-  return (v == 1) ? MapType::kExamTrack : MapType::kRing;
-}
-
 class RingRoadSimNode : public rclcpp::Node {
 public:
   RingRoadSimNode()
@@ -92,7 +86,7 @@ public:
       , map_(create_map(MapType::kRing))
       , driver_()
       , sim_time_(0.0)
-      , obstacle_manager_(25.0, 6.0, 20240812)
+      , obstacle_manager_(26.0, 9.0, 20240812)
   {
     auto road_qos = rclcpp::QoS(10).transient_local();
     auto live_qos = rclcpp::QoS(10).reliable();
@@ -112,13 +106,9 @@ public:
     action_pub_   = create_publisher<std_msgs::msg::Float64>("sdc/action_id", live_qos);
     distance_pub_ = create_publisher<std_msgs::msg::Float64>("sdc/front_distance", live_qos);
     obstacle_pub2_ = create_publisher<std_msgs::msg::Float64>("sdc/obstacle_count", live_qos);
+    mode_pub_     = create_publisher<std_msgs::msg::Int32>("sdc/mode", live_qos);
 
-    // 考试状态话题
-    exam_status_pub_  = create_publisher<std_msgs::msg::String>("sdc/exam_status", live_qos);
-    exam_item_pub_    = create_publisher<std_msgs::msg::Int32>("sdc/exam_item", live_qos);
-    exam_progress_pub_= create_publisher<std_msgs::msg::String>("sdc/exam_progress", live_qos);
-
-    // 开始行驶（环形地图）
+    // 开始行驶（自动）
     start_sub_ = create_subscription<std_msgs::msg::Bool>(
         "sdc/start", 10, [this](const std_msgs::msg::Bool::SharedPtr msg) {
           if (msg->data) {
@@ -138,7 +128,7 @@ public:
         "sdc/clear_trail", 10, [this](const std_msgs::msg::Bool::SharedPtr msg) {
           if (msg->data) { trail_.clear(); RCLCPP_INFO(get_logger(), "行驶轨迹已清除"); }
         });
-    // 切换速度控制算法
+    // 切换速度控制算法（自动模式）
     algo_sub_ = create_subscription<std_msgs::msg::Int32>(
         "sdc/control_algo", 10, [this](const std_msgs::msg::Int32::SharedPtr msg) {
           int a = msg->data;
@@ -148,15 +138,17 @@ public:
           RCLCPP_INFO(get_logger(), "控制算法切换为: %s",
                       velocity_algorithm_name(driver_.velocity_ctrl().algorithm()));
         });
-    // 切换地图（0=环形 1=科目二）
-    set_map_sub_ = create_subscription<std_msgs::msg::Int32>(
-        "sdc/set_map", 10, [this](const std_msgs::msg::Int32::SharedPtr msg) {
-          switch_map(map_type_from_int(msg->data));
+    // 驾驶模式切换（0=自动 1=手动）
+    set_mode_sub_ = create_subscription<std_msgs::msg::Int32>(
+        "sdc/set_mode", 10, [this](const std_msgs::msg::Int32::SharedPtr msg) {
+          set_mode(msg->data == 1 ? Mode::kManual : Mode::kAuto);
         });
-    // 开始考试（科目二）
-    start_exam_sub_ = create_subscription<std_msgs::msg::Bool>(
-        "sdc/start_exam", 10, [this](const std_msgs::msg::Bool::SharedPtr msg) {
-          if (msg->data) start_exam();
+    // 手动控制指令（WASD 键盘）
+    manual_sub_ = create_subscription<geometry_msgs::msg::Twist>(
+        "sdc/manual_cmd", 10,
+        [this](const geometry_msgs::msg::Twist::SharedPtr msg) {
+          manual_throttle_ = msg->linear.x;   // W/S：油门（>0 前进，<0 倒车）
+          manual_steer_    = msg->angular.z;   // A/D：转向（-1..1）
         });
     // 重置小车到起点
     reset_sub_ = create_subscription<std_msgs::msg::Bool>(
@@ -166,9 +158,9 @@ public:
 
     tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
 
-    // 读取启动参数 initial_map（0=环形 1=科目二）
-    int initial_map = declare_parameter<int>("initial_map", 0);
-    MapType init_type = map_type_from_int(initial_map);
+    // 读取启动参数 initial_mode（0=自动 1=手动）
+    int initial_mode = declare_parameter<int>("initial_mode", 0);
+    set_mode(initial_mode == 1 ? Mode::kManual : Mode::kAuto);
 
     timer_ = create_wall_timer(
         std::chrono::duration<double>(SIM_DT),
@@ -177,20 +169,20 @@ public:
         std::chrono::milliseconds(100),
         std::bind(&RingRoadSimNode::publish_lidar, this));
 
-    load_map(init_type);  // 按启动参数加载地图
+    load_map(MapType::kRing);
 
-    RCLCPP_INFO(get_logger(), "自动驾驶仿真启动：环形道路(开始/暂停) + 科目二综合赛道(开始考试)");
+    RCLCPP_INFO(get_logger(), "自动驾驶仿真启动：环形道路（自动/手动驾驶，WASD 控制）");
   }
 
 private:
+  enum class Mode { kAuto = 0, kManual = 1 };
+
   // ========== 地图加载 ==========
   void load_map(MapType t) {
     map_ = create_map(t);
     driver_.reset(map_.get());
     trail_.clear();
-    exam_ = ExamManager();
-    // 环形地图默认可行驶；科目二需点「开始考试」
-    driving_ = (t == MapType::kRing);
+    driving_ = true;
     paused_ = false;
     road_markers_ = map_->build_road_markers();
     extra_markers_ = map_->build_extra_markers();
@@ -198,87 +190,60 @@ private:
     RCLCPP_INFO(get_logger(), "已加载地图: %s", map_->name().c_str());
   }
 
-  void switch_map(MapType t) {
-    load_map(t);
+  void set_mode(Mode m) {
+    mode_ = m;
+    manual_throttle_ = 0.0;
+    manual_steer_ = 0.0;
+    RCLCPP_INFO(get_logger(), "驾驶模式切换为: %s",
+                (mode_ == Mode::kManual ? "手动(WASD)" : "自动"));
   }
 
-  // 重置小车到地图起点（并清空考试/航点状态）
+  // 重置小车到环形起点
   void reset_car() {
-    if (map_->name() == "科目二综合赛道") {
-      // 科目二：重置到当前科目站点的起点
-      auto* et = static_cast<ExamTrackMap*>(map_.get());
-      int st = std::max(0, exam_.current_index());
-      et->reset_to_station(st);
-    }
     driver_.reset(map_.get());
     trail_.clear();
-    RCLCPP_INFO(get_logger(), "小车已重置到地图起点");
-  }
-
-  // 开始科目二考试
-  void start_exam() {
-    if (map_->name() != "科目二综合赛道") {
-      RCLCPP_WARN(get_logger(), "当前地图不是科目二综合赛道，无法开始考试");
-      return;
-    }
-    exam_.start();
-    // 定位到第一个科目站点
-    auto* et = static_cast<ExamTrackMap*>(map_.get());
-    et->reset_to_station(0);
-    driver_.reset(map_.get());
-    driving_ = true;
-    paused_ = false;
-    RCLCPP_INFO(get_logger(), "科目二考试开始：倒车入库");
+    manual_throttle_ = 0.0;
+    manual_steer_ = 0.0;
+    RCLCPP_INFO(get_logger(), "小车已重置到环形起点");
   }
 
   // ========== 仿真主循环 ==========
   void simulation_step() {
-    // 处理考试：刚完成一个科目 / 刚开始时定位到对应站点航点（车保持在道路上，不重置位置）
-    if (exam_.running() && exam_.consume_seek_needed()) {
-      auto* et = static_cast<ExamTrackMap*>(map_.get());
-      et->reset_to_station(exam_.current_index());
-    }
-
     if (driving_ && !paused_) {
-      // 仅在环形道路注入随机障碍物（科目二综合赛道无障碍物）
-      if (map_->name() == "环形道路") {
-        obstacle_manager_.update(SIM_DT);
-      }
-      // 把随机障碍喂给 driver 参与避障
+      // 动态随机障碍物
+      obstacle_manager_.update(SIM_DT);
       std::vector<Obstacle> extra;
       for (const auto& ob : obstacle_manager_.obstacles())
         extra.push_back(Obstacle{Vec2{ob.x, ob.y}, ob.radius});
       driver_.set_extra_obstacles(extra);
 
-      // 目标点：当前地图的当前航点/默认目标；考试时读取倒车允许标志
-      Vec2 target = map_->goal_point();
-      bool allow_reverse = exam_.running() ? map_->current_allow_reverse() : false;
-
-      auto res = driver_.step(target, allow_reverse, SIM_DT);
+      if (mode_ == Mode::kManual) {
+        // 手动驾驶：WASD 直接控制
+        double throttle = manual_throttle_;
+        double steer = manual_steer_;
+        // 当没有任何按键时，松开油门即减速至 0（回归中性）
+        last_action_ = Action::kCruise;
+        driver_.manual_step(throttle, steer, SIM_DT);
+        last_front_dist_ = driver_front_dist();
+      } else {
+        // 自动驾驶：目标点为沿环前进的虚拟点
+        Vec2 target = map_->goal_point();
+        auto res = driver_.step(target, false, SIM_DT);
+        last_front_dist_ = res.front_dist;
+        last_action_ = res.action;
+      }
 
       // 记录轨迹
       sim_time_ += SIM_DT;
       trail_.push_back(make_point(driver_.car().x(), driver_.car().y(), 0.05));
       if (trail_.size() > TRAIL_MAX_POINTS) trail_.pop_front();
 
-      // 科目二考试推进：到达当前航点 → 进入下一航点
-      if (exam_.running() && res.goal_reached) {
-        bool station_done = map_->advance();
-        if (station_done) {
-          RCLCPP_INFO(get_logger(), "科目完成: %s", exam_.current_name().c_str());
-          exam_.on_item_passed();
-        }
-      }
-
-      last_front_dist_ = res.front_dist;
-      last_action_ = res.action;
-
       if (static_cast<int>(sim_time_ * 10) % 5 == 0 &&
           static_cast<int>(sim_time_ * 100) % 100 == 0) {
         RCLCPP_INFO(get_logger(),
-                    "[%.1fs] 地图:%-12s | 速度:%.2f | 前方:%.2f | 行为:%-6s",
-                    sim_time_, map_->name().c_str(), res.speed, res.front_dist,
-                    action_name(res.action));
+                    "[%.1fs] 模式:%-6s | 速度:%.2f | 前方:%.2f | 行为:%-6s",
+                    sim_time_, mode_ == Mode::kManual ? "手动" : "自动",
+                    driver_.speed(), last_front_dist_, action_name(last_action_));
       }
     }
 
@@ -295,6 +260,23 @@ private:
     }
   }
 
+  // 手动模式下计算前方障碍距离（含静态复杂路况 + 动态障碍）
+  double driver_front_dist() {
+    auto obstacles = map_->to_obstacles();
+    for (const auto& ob : obstacle_manager_.obstacles())
+      obstacles.push_back(Obstacle{Vec2{ob.x, ob.y}, ob.radius});
+    double cx = driver_.car().x(), cy = driver_.car().y(), cyaw = driver_.car().yaw();
+    const double fx = std::cos(cyaw), fy = std::sin(cyaw);
+    double min_d = LIDAR_RANGE;
+    for (const auto& ob : obstacles) {
+      double dx = ob.position.x - cx, dy = ob.position.y - cy;
+      double dist = std::hypot(dx, dy) - ob.radius;
+      if (dist < 0) dist = 0.0;
+      if (dist < min_d && (dx * fx + dy * fy) > 0.2) min_d = dist;
+    }
+    return min_d;
+  }
+
   // ========== 状态话题发布 ==========
   void publish_status() {
     auto f = [](double v) { auto m = std_msgs::msg::Float64(); m.data = v; return m; };
@@ -303,31 +285,16 @@ private:
     distance_pub_->publish(f(last_front_dist_));
     obstacle_pub2_->publish(f(static_cast<double>(obstacle_manager_.size())));
 
-    // 考试状态
-    std_msgs::msg::String status;
-    status.data = exam_.status_text();
-    exam_status_pub_->publish(status);
-
-    std_msgs::msg::Int32 item;
-    item.data = exam_.finished()
-        ? static_cast<int>(exam_.total()) - 1
-        : exam_.current_index();
-    exam_item_pub_->publish(item);
-
-    std_msgs::msg::String prog;
-    char buf[64];
-    int shown_idx = exam_.finished()
-        ? static_cast<int>(exam_.total())
-        : exam_.current_index() + 1;
-    std::snprintf(buf, sizeof(buf), "%d/%zu", shown_idx, exam_.total());
-    prog.data = buf;
-    exam_progress_pub_->publish(prog);
+    std_msgs::msg::Int32 mode;
+    mode.data = (mode_ == Mode::kManual) ? 1 : 0;
+    mode_pub_->publish(mode);
   }
 
-  // ========== 障碍物（仅环形地图随机障碍） ==========
+  // ========== 障碍物标记（动态随机障碍 + 静态复杂路况） ==========
   void publish_obstacles_marker() {
     visualization_msgs::msg::MarkerArray ma;
     int id = 0;
+    // 动态障碍（橙色方块）
     for (const auto& ob : obstacle_manager_.obstacles()) {
       visualization_msgs::msg::Marker m;
       m.header.frame_id = "world"; m.header.stamp = now();
@@ -340,13 +307,18 @@ private:
       m.color.r = 0.95f; m.color.g = 0.25f; m.color.b = 0.1f; m.color.a = 0.95f;
       ma.markers.push_back(m);
     }
+    // 静态路况障碍（绕桩锥桶/窄门/路障，黄色/红色）
+    // 这里仅绘制锥桶等静态特征，简化处理：复用 map 静态障碍中的桩桶标记
+    // （桩桶等已通过 build_road_markers 的可视化体现，此处不重复绘制）
     obstacle_pub_->publish(ma);
   }
 
-  // ========== 局部规划候选路径可视化 ==========
+  // ========== 局部规划候选路径可视化（自动模式） ==========
   void publish_lattice_marker() {
     double cx = driver_.car().x(), cy = driver_.car().y(), cyaw = driver_.car().yaw();
     auto obstacles = map_->to_obstacles();
+    for (const auto& ob : obstacle_manager_.obstacles())
+      obstacles.push_back(Obstacle{Vec2{ob.x, ob.y}, ob.radius});
     std::vector<LatticeTrajectory> candidates;
     lattice_planner_.plan(cx, cy, cyaw, obstacles, candidates);
 
@@ -371,10 +343,9 @@ private:
   void publish_lidar() {
     double cx = driver_.car().x(), cy = driver_.car().y(), cyaw = driver_.car().yaw();
     auto obstacles = map_->to_obstacles();
-    // 合并随机障碍（仅环形）
-    std::vector<Obstacle> all = obstacles;
+    // 合并随机障碍
     for (const auto& ob : obstacle_manager_.obstacles())
-      all.push_back(Obstacle{Vec2{ob.x, ob.y}, ob.radius});
+      obstacles.push_back(Obstacle{Vec2{ob.x, ob.y}, ob.radius});
 
     sensor_msgs::msg::PointCloud2 cloud;
     cloud.header.frame_id = "world"; cloud.header.stamp = now();
@@ -390,7 +361,7 @@ private:
       double theta = cyaw + 2.0 * M_PI * i / LIDAR_BEAMS;
       double dx = std::cos(theta), dy = std::sin(theta);
       double dist = LIDAR_RANGE; double hit_t = -1.0;
-      for (const auto& ob : all) {
+      for (const auto& ob : obstacles) {
         double ox = ob.position.x - cx, oy = ob.position.y - cy;
         double b = dx * ox + dy * oy;
         double c = ox * ox + oy * oy - ob.radius * ob.radius;
@@ -443,19 +414,6 @@ private:
       m.color.a = 1.0f;
       ma.markers.push_back(m);
     }
-    // 目标点标记（考试时高亮当前航点）
-    if (exam_.running()) {
-      Vec2 g = map_->goal_point();
-      visualization_msgs::msg::Marker m;
-      m.header.frame_id = "world"; m.header.stamp = now();
-      m.ns = "goal"; m.id = 0;
-      m.type = m.SPHERE; m.action = m.ADD;
-      m.pose.position.x = g.x; m.pose.position.y = g.y; m.pose.position.z = 0.3;
-      m.pose.orientation.w = 1.0;
-      m.scale.x = 1.2; m.scale.y = 1.2; m.scale.z = 1.2;
-      m.color.r = 0.1f; m.color.g = 1.0f; m.color.b = 0.3f; m.color.a = 0.8f;
-      ma.markers.push_back(m);
-    }
     // 行驶轨迹
     if (trail_.size() > 2) {
       visualization_msgs::msg::Marker m;
@@ -477,10 +435,10 @@ private:
       m.scale.z = 1.4;
       m.color.r = 1; m.color.g = 1; m.color.b = 1; m.color.a = 1;
       char buf[200];
+      const char* mode_str = (mode_ == Mode::kManual) ? "手动(WASD)" : "自动";
       std::snprintf(buf, sizeof(buf),
-                    "v=%.1f m/s  %s\n%s",
-                    driver_.speed(), action_name(last_action_),
-                    exam_.status_text().c_str());
+                    "模式:%s  v=%.1f m/s  %s",
+                    mode_str, driver_.speed(), action_name(last_action_));
       m.text = buf;
       ma.markers.push_back(m);
     }
@@ -491,7 +449,7 @@ private:
   void publish_road_markers() {
     for (auto& mk : road_markers_.markers) mk.header.stamp = now();
     road_pub_->publish(road_markers_);
-    // 额外标记（库位标签等）
+    // 额外标记（路况标签等）
     for (auto& mk : extra_markers_.markers) mk.header.stamp = now();
     if (!extra_markers_.markers.empty()) road_pub_->publish(extra_markers_);
   }
@@ -512,9 +470,12 @@ private:
   // ========== 成员 ==========
   std::unique_ptr<ScenarioMap> map_;
   AutoDriver driver_;
-  ExamManager exam_;
   ObstacleManager obstacle_manager_;
   LatticePlanner lattice_planner_;
+
+  Mode mode_{Mode::kAuto};
+  double manual_throttle_{0.0};
+  double manual_steer_{0.0};
 
   double sim_time_{0.0};
   double road_resend_accum_{0.0};
@@ -536,16 +497,14 @@ private:
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr action_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr distance_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr obstacle_pub2_;
-  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr exam_status_pub_;
-  rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr exam_item_pub_;
-  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr exam_progress_pub_;
+  rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr mode_pub_;
 
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr start_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr pause_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr clear_sub_;
   rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr algo_sub_;
-  rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr set_map_sub_;
-  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr start_exam_sub_;
+  rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr set_mode_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr manual_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr reset_sub_;
 
   rclcpp::TimerBase::SharedPtr timer_;

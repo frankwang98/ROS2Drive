@@ -1,11 +1,10 @@
 /**
  * sdc_hud_panel.cpp — 自动驾驶小车 HUD 控制面板实现
  *
- * 双地图控制：
- *   - 地图1「环形道路」：提供「开始 / 暂停」行驶，保留障碍物避障。
- *   - 地图2「科目二综合赛道」：倒车入库 / 侧方停车 / 直角转弯 三个科目
- *     在同一条道路上，提供「开始考试」，无障碍物。
- * 切换地图时，按钮随当前地图动态启用/隐藏。
+ * 功能：
+ *   - 自动 / 手动驾驶模式切换
+ *   - 手动模式下 WASD 键盘控制（W=前进 S=倒车 A=左转 D=右转）
+ *   - 开始 / 暂停、清除轨迹、重置小车
  */
 
 #include "sdc_hud_panel.hpp"
@@ -26,12 +25,11 @@ HudPanel::HudPanel(QWidget* parent)
     , speed_label_(nullptr)
     , action_label_(nullptr)
     , distance_label_(nullptr)
-    , exam_label_(nullptr)
-    , map_combo_(nullptr)
+    , mode_label_(nullptr)
     , start_button_(nullptr)
     , pause_button_(nullptr)
     , clear_button_(nullptr)
-    , exam_button_(nullptr)
+    , mode_button_(nullptr)
     , reset_button_(nullptr)
     , ui_timer_(nullptr)
 {
@@ -43,21 +41,24 @@ HudPanel::HudPanel(QWidget* parent)
   speed_label_ = new QLabel("速度: -- m/s", state_box);
   action_label_ = new QLabel("行为: --", state_box);
   distance_label_ = new QLabel("前方距离: -- m", state_box);
+  mode_label_ = new QLabel("驾驶模式: 自动", state_box);
   state_layout->addWidget(speed_label_);
   state_layout->addWidget(action_label_);
   state_layout->addWidget(distance_label_);
+  state_layout->addWidget(mode_label_);
   root->addWidget(state_box);
 
-  // 地图选择区
-  auto* map_box = new QGroupBox("地图", this);
-  auto* map_layout = new QVBoxLayout(map_box);
-  map_combo_ = new QComboBox(map_box);
-  map_combo_->addItem("环形道路");        // 0 = Map 1（开始/暂停）
-  map_combo_->addItem("科目二综合赛道");   // 1 = Map 2（开始考试）
-  map_layout->addWidget(map_combo_);
-  root->addWidget(map_box);
+  // 驾驶模式区
+  auto* mode_box = new QGroupBox("驾驶模式", this);
+  auto* mode_layout = new QVBoxLayout(mode_box);
+  mode_button_ = new QPushButton("切换到手动 (WASD)", mode_box);
+  mode_layout->addWidget(mode_button_);
+  auto* hint = new QLabel("手动模式：W=前进  S=倒车  A=左转  D=右转", mode_box);
+  hint->setWordWrap(true);
+  mode_layout->addWidget(hint);
+  root->addWidget(mode_box);
 
-  // 控制区（环形道路：开始 / 暂停）
+  // 行驶控制区
   auto* ctrl_box = new QGroupBox("行驶控制", this);
   auto* ctrl_layout = new QVBoxLayout(ctrl_box);
   auto* ctrl_row = new QHBoxLayout();
@@ -72,26 +73,16 @@ HudPanel::HudPanel(QWidget* parent)
   ctrl_layout->addWidget(reset_button_);
   root->addWidget(ctrl_box);
 
-  // 考试区（科目二综合赛道：开始考试）
-  auto* exam_box = new QGroupBox("科目二考试", this);
-  auto* exam_layout = new QVBoxLayout(exam_box);
-  exam_label_ = new QLabel("考试: 待开始", exam_box);
-  exam_button_ = new QPushButton("开始考试", exam_box);
-  exam_layout->addWidget(exam_label_);
-  exam_layout->addWidget(exam_button_);
-  root->addWidget(exam_box);
-
   // 信号连接
   connect(start_button_, &QPushButton::clicked, this, &HudPanel::onStart);
   connect(pause_button_, &QPushButton::clicked, this, &HudPanel::onTogglePause);
   connect(clear_button_, &QPushButton::clicked, this, &HudPanel::onClearTrail);
+  connect(mode_button_, &QPushButton::clicked, this, &HudPanel::onToggleMode);
   connect(reset_button_, &QPushButton::clicked, this, &HudPanel::onResetCar);
-  connect(exam_button_, &QPushButton::clicked, this, &HudPanel::onStartExam);
-  connect(map_combo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
-          this, &HudPanel::onMapChanged);
 
-  // 初始：默认地图 1（环形道路）
-  updateMapUi(0);
+  // 允许面板接收键盘焦点（WASD 控制需要）
+  setFocusPolicy(Qt::StrongFocus);
+  setFocus();
 
   // 速度大字体
   QFont font = speed_label_->font();
@@ -113,20 +104,18 @@ void HudPanel::onInitialize() {
       "sdc/action_id", qos, std::bind(&HudPanel::onAction, this, std::placeholders::_1));
   distance_sub_ = node_->create_subscription<std_msgs::msg::Float64>(
       "sdc/front_distance", qos, std::bind(&HudPanel::onDistance, this, std::placeholders::_1));
-  exam_status_sub_ = node_->create_subscription<std_msgs::msg::String>(
-      "sdc/exam_status", qos, std::bind(&HudPanel::onExamStatus, this, std::placeholders::_1));
-  exam_progress_sub_ = node_->create_subscription<std_msgs::msg::String>(
-      "sdc/exam_progress", qos, std::bind(&HudPanel::onExamProgress, this, std::placeholders::_1));
+  mode_sub_ = node_->create_subscription<std_msgs::msg::Int32>(
+      "sdc/mode", qos, std::bind(&HudPanel::onMode, this, std::placeholders::_1));
 
   start_pub_ = node_->create_publisher<std_msgs::msg::Bool>("sdc/start", qos);
   pause_pub_ = node_->create_publisher<std_msgs::msg::Bool>("sdc/pause", qos);
   clear_pub_ = node_->create_publisher<std_msgs::msg::Bool>("sdc/clear_trail", qos);
-  start_exam_pub_ = node_->create_publisher<std_msgs::msg::Bool>("sdc/start_exam", qos);
+  set_mode_pub_ = node_->create_publisher<std_msgs::msg::Int32>("sdc/set_mode", qos);
   reset_pub_ = node_->create_publisher<std_msgs::msg::Bool>("sdc/reset_car", qos);
-  set_map_pub_ = node_->create_publisher<std_msgs::msg::Int32>("sdc/set_map", qos);
+  manual_pub_ = node_->create_publisher<geometry_msgs::msg::Twist>("sdc/manual_cmd", qos);
 
   ui_timer_ = new QTimer(this);
-  ui_timer_->setInterval(100);
+  ui_timer_->setInterval(50);   // 20Hz 手动指令发送
   connect(ui_timer_, &QTimer::timeout, this, &HudPanel::onStatusTimer);
   ui_timer_->start();
 }
@@ -142,8 +131,16 @@ HudPanel::~HudPanel() {
 void HudPanel::onSpeed(const std_msgs::msg::Float64::SharedPtr msg) { speed_ = msg->data; }
 void HudPanel::onAction(const std_msgs::msg::Float64::SharedPtr msg) { action_id_ = static_cast<int>(msg->data); }
 void HudPanel::onDistance(const std_msgs::msg::Float64::SharedPtr msg) { distance_ = msg->data; }
-void HudPanel::onExamStatus(const std_msgs::msg::String::SharedPtr msg) { exam_status_ = msg->data; }
-void HudPanel::onExamProgress(const std_msgs::msg::String::SharedPtr msg) { exam_progress_ = msg->data; }
+void HudPanel::onMode(const std_msgs::msg::Int32::SharedPtr msg) {
+  manual_ = (msg->data == 1);
+  mode_label_->setText(QString("驾驶模式: %1").arg(manual_ ? "手动 (WASD)" : "自动"));
+  mode_button_->setText(manual_ ? "切换到自动" : "切换到手动 (WASD)");
+  if (!manual_) {
+    // 切回自动时松开全部键
+    key_w_ = key_s_ = key_a_ = key_d_ = false;
+    publishManualCmd();
+  }
+}
 
 void HudPanel::onStatusTimer() {
   if (speed_label_)  speed_label_->setText(QString("速度: %1 m/s").arg(speed_, 0, 'f', 1));
@@ -153,35 +150,52 @@ void HudPanel::onStatusTimer() {
     action_label_->setText(QString("行为: %1").arg(name));
   }
   if (distance_label_) distance_label_->setText(QString("前方距离: %1 m").arg(distance_, 0, 'f', 1));
-  if (exam_label_) {
-    QString t = QString::fromStdString(exam_status_);
-    if (!exam_progress_.empty())
-      t += QString("  (%1)").arg(QString::fromStdString(exam_progress_));
-    exam_label_->setText("考试: " + t);
-  }
   if (pause_button_) pause_button_->setText(paused_ ? "继续" : "暂停");
+
+  // 手动模式下持续发送指令（保证松开后自动回中）
+  if (manual_) publishManualCmd();
 }
 
-void HudPanel::updateMapUi(int index) {
-  bool is_exam = (index == 1);  // 1 = 科目二综合赛道
-  // 环形道路：开始 / 暂停
-  start_button_->setVisible(!is_exam);
-  pause_button_->setVisible(!is_exam);
-  // 科目二：开始考试
-  exam_button_->setVisible(is_exam);
-  exam_label_->setVisible(is_exam);
+// ---- 键盘事件（WASD）----
+void HudPanel::keyPressEvent(QKeyEvent* event) {
+  if (manual_) updateKey(event->key(), true);
+  QWidget::keyPressEvent(event);
 }
 
-void HudPanel::onMapChanged(int index) {
-  updateMapUi(index);
-  // 重置考试显示
-  exam_status_.clear();
-  exam_progress_.clear();
-  paused_ = false;
-  auto msg = std_msgs::msg::Int32(); msg.data = index;  // 0=环形 1=科目二
-  set_map_pub_->publish(msg);
+void HudPanel::keyReleaseEvent(QKeyEvent* event) {
+  if (manual_) updateKey(event->key(), false);
+  QWidget::keyReleaseEvent(event);
 }
 
+void HudPanel::updateKey(int key, bool pressed) {
+  bool changed = false;
+  switch (key) {
+    case Qt::Key_W: if (key_w_ != pressed) { key_w_ = pressed; changed = true; } break;
+    case Qt::Key_S: if (key_s_ != pressed) { key_s_ = pressed; changed = true; } break;
+    case Qt::Key_A: if (key_a_ != pressed) { key_a_ = pressed; changed = true; } break;
+    case Qt::Key_D: if (key_d_ != pressed) { key_d_ = pressed; changed = true; } break;
+    default: break;
+  }
+  if (changed) publishManualCmd();
+}
+
+void HudPanel::publishManualCmd() {
+  if (!manual_pub_) return;
+  geometry_msgs::msg::Twist twist;
+  // 油门：W 前进(+1)，S 倒车(-1)；同时按则相互抵消
+  double throttle = 0.0;
+  if (key_w_) throttle += 1.0;
+  if (key_s_) throttle -= 1.0;
+  // 转向：A 左(-1)，D 右(+1)
+  double steer = 0.0;
+  if (key_a_) steer -= 1.0;
+  if (key_d_) steer += 1.0;
+  twist.linear.x = throttle;
+  twist.angular.z = steer;
+  manual_pub_->publish(twist);
+}
+
+// ---- 控制按钮 ----
 void HudPanel::onStart() {
   auto msg = std_msgs::msg::Bool(); msg.data = true;
   start_pub_->publish(msg);
@@ -201,14 +215,20 @@ void HudPanel::onClearTrail() {
   clear_pub_->publish(msg);
 }
 
+void HudPanel::onToggleMode() {
+  manual_ = !manual_;
+  auto msg = std_msgs::msg::Int32(); msg.data = manual_ ? 1 : 0;
+  set_mode_pub_->publish(msg);
+  if (!manual_) {
+    key_w_ = key_s_ = key_a_ = key_d_ = false;
+    publishManualCmd();
+  }
+  onStatusTimer();
+}
+
 void HudPanel::onResetCar() {
   auto msg = std_msgs::msg::Bool(); msg.data = true;
   reset_pub_->publish(msg);
-}
-
-void HudPanel::onStartExam() {
-  auto msg = std_msgs::msg::Bool(); msg.data = true;
-  start_exam_pub_->publish(msg);
 }
 
 void HudPanel::load(const rviz_common::Config& config) { Panel::load(config); }

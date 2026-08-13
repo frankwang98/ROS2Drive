@@ -2,33 +2,39 @@
 
 一个基于 **ROS2 (Humble) + C++** 的自动驾驶小车演示项目，包含：
 **感知（Sensor）→ 决策（Decision）→ 控制（Control）** 完整闭环，
-并提供**环形道路仿真**，可在 **RViz2** 中实时可视化。
+并提供**复杂环形道路仿真**，可在 **RViz2** 中实时可视化。
 
 ## 功能概览
 
 - **感知层**：距离传感器模拟，检测小车前方障碍物距离（含噪声）
 - **决策层**：根据传感器数据决定小车行为（加速 / 匀速 / 减速 / 停车）
 - **控制层**：电机控制器，根据决策结果平滑调节速度
+- **复杂环形道路**：在基础环形基础上增加道路复杂性——
+  - **S 形绕桩路段**：一排交替内/外侧桩桶，车辆需蛇形穿梭
+  - **窄门路段**：两侧收窄形成门形通道，考验居中控制
+  - **减速带 / 静态路障**：部分路段设置固定障碍，需绕行
+  - **多车道标线 / 双黄线 / 人行横道** 等路面细节增强路感
 - **随机障碍物系统**：在环形道路上随机生成 / 消失障碍物（位置、大小、存活时长随机），RViz 中以红色方块实时显示
 - **Lattice 局部规划避障**：基于 lattice 采样生成多条候选局部路径，根据与障碍物的距离与横向偏移评估代价，选择最优避障轨迹，并在 RViz 中显示候选路径（灰）与选中的最优路径（绿）
 - **多种速度控制算法**：支持 PID / Bang-Bang / Ramp 三种算法，可通过话题 `/sdc/control_algo` 实时切换
-- **阿克曼运动学模型**：小车基于**单车（bicycle）模型**真实转弯行驶（非完整约束），满足 `yaw' = v/L·tan(δ)`；配合 Stanley 转向控制（航向误差 + 前轴横向误差）平滑跟踪期望路径，避免随意斜线滑移与"画龙"抖动
-- **自动驾驶仿真节点** (`ring_road_sim`)：内置 **2 张地图**
-  - **环形道路（Map 1）**：RViz2 Marker 绘制环形双车道（路面 + 内/外边界 + 中央虚线），小车沿环道避障行驶，HUD 提供「开始 / 暂停」
-  - **科目二综合赛道（Map 2）**：倒车入库 / 侧方停车 / 直角转弯 三个科目**在同一条道路上**依次完成，HUD 提供「开始考试」，**无障碍物**
+- **阿克曼运动学模型**：小车基于**单车（bicycle）模型**真实转弯行驶（非完整约束），满足 `yaw' = v/L·tan(δ)`；配合 Stanley 转向控制平滑跟踪期望路径
+- **自动驾驶仿真节点** (`ring_road_sim`)：单张环形地图，支持 **自动 / 手动** 两种驾驶模式：
+  - **自动**：Lattice 避障 + Stanley 循迹，沿环形道路自主行驶
+  - **手动**：通过 **WASD 键盘**直接控制（W=前进  S=倒车  A=左转  D=右转）
   - 车体 + 速度矢量箭头（颜色随加速/巡航/减速/停车变化）
   - TF 广播 `world → car_base_link`
 - **自动驾驶常用可视化控件**（仿真节点内置）：
   - LIDAR 点云（360° 扫描，`/sensor/lidar`，PointCloud2，含障碍物反射）
   - 规划路径（绿色曲线沿环道中心前伸）
   - 行驶轨迹（青色历史轨迹，可清除）
-  - 状态 3D 文本（速度 / 行为 / 前方距离 / 控制算法，悬于车顶）
+  - 状态 3D 文本（模式 / 速度 / 行为，悬于车顶）
   - 障碍物（`/simulation/obstacles`）与局部规划候选路径（`/simulation/lattice`）
-  - HUD 控制话题：`/sdc/speed`、`/sdc/action_id`、`/sdc/front_distance`、`/sdc/start`、`/sdc/pause`、`/sdc/clear_trail`、`/sdc/control_algo`、`/sdc/set_map`、`/sdc/start_exam`、`/sdc/exam_status`
+  - HUD 控制话题：`/sdc/speed`、`/sdc/action_id`、`/sdc/front_distance`、`/sdc/mode`、`/sdc/set_mode`、`/sdc/manual_cmd`、`/sdc/start`、`/sdc/pause`、`/sdc/clear_trail`、`/sdc/control_algo`
 - **RViz 自定义 HUD 面板插件** (`sdc/HudPanel`)：
-  - 实时显示速度 / 行为 / 前方距离
-  - 切换地图（环形道路 / 科目二综合赛道）
-  - 环形道路：开始 / 暂停；科目二：开始考试
+  - 实时显示速度 / 行为 / 前方距离 / 驾驶模式
+  - **自动 / 手动驾驶模式切换**
+  - 手动模式下 **WASD 键盘控制**
+  - 开始 / 暂停、清除轨迹、重置小车
   - 随 `ring_road.rviz` 默认加载
 - **小车控制器节点** (`car_controller`)：独立 ROS2 节点，订阅距离话题 → 决策 → 控制 → 发布速度
 
@@ -94,20 +100,20 @@ source /opt/ros/humble/setup.bash
 colcon build --packages-select self_driving_car_demo
 source install/setup.bash
 
-# 3. 启动仿真（自动拉起 RViz2）。可用 map 参数指定初始地图：
-#     0=环形道路 1=科目二综合赛道
+# 3. 启动仿真（自动拉起 RViz2）。可用 mode 参数指定初始驾驶模式：
+#     0=自动 1=手动(WASD)
 ros2 launch self_driving_car_demo ring_road.launch.py
-ros2 launch self_driving_car_demo ring_road.launch.py map:=1   # 科目二综合赛道
+ros2 launch self_driving_car_demo ring_road.launch.py mode:=1   # 手动驾驶启动
 ```
 
 启动后即可在 RViz2 中看到（`ring_road.rviz` 已默认加载以下话题与面板，**无需手动订阅**）：
-- 灰色环形双车道 + 白色标线（`/simulation/markers`，Transient Local，打开即可见）
+- 灰色环形双车道 + 白/黄标线 + 复杂路况（`/simulation/markers`，Transient Local，打开即可见）
 - 蓝色小车沿环道行驶 + 速度矢量箭头（颜色随行为变化：绿=加速 / 蓝=巡航 / 橙=减速 / 红=停车）
 - 随机红色障碍物方块（`/simulation/obstacles`，随机生成 / 消失）
 - Lattice 局部规划：灰色候选路径 + 绿色选中的最优避障路径（`/simulation/lattice`）
 - 绿色规划路径 + 青色行驶轨迹 + 车顶 3D 状态文本（`/simulation/markers_live`）
 - 360° LIDAR 点云（黄色，`/sensor/lidar`）
-- **SDC HUD 面板**（右侧，`sdc/HudPanel`）：实时显示小车状态，切换地图、开始/暂停、开始考试
+- **SDC HUD 面板**（右侧，`sdc/HudPanel`）：实时显示小车状态、切换自动/手动驾驶
 
 > 如果使用自定义 RViz 窗口，可手动添加以上话题与面板：
 > - `/simulation/markers`（道路，MarkerArray）
@@ -117,46 +123,36 @@ ros2 launch self_driving_car_demo ring_road.launch.py map:=1   # 科目二综合
 > - `/sensor/lidar`（LIDAR 点云）
 > - 面板：`Panels → Add → New panel → sdc/HudPanel`
 
-## 切换地图与科目二考试
+## 自动 / 手动驾驶
 
-仿真内置 **2 张地图**，功能区分清晰：
+仿真内置 **2 种驾驶模式**，可随时切换：
 
-| 地图 | 功能 | 按钮 | 障碍物 |
-| --- | --- | --- | --- |
-| **1. 环形道路** | 原有环形车道行驶 | 「开始 / 暂停」 | 保留随机障碍避障 |
-| **2. 科目二综合赛道** | 倒车入库 / 侧方停车 / 直角转弯 三个科目**在同一条道路上**依次完成 | 「开始考试」 | 无障碍物 |
+| 模式 | 说明 | 控制方式 |
+| --- | --- | --- |
+| **自动** | Lattice 局部避障 + Stanley 循迹，沿复杂环形道路自主行驶，自动绕开桩桶/窄门/路障 | 无需操作 |
+| **手动 (WASD)** | 通过键盘直接控制车辆 | W=前进  S=倒车  A=左转  D=右转 |
 
 **方式一：RViz HUD 面板**（推荐）
-- 右侧 `SDC HUD 面板` 的「地图」下拉框选择：`环形道路` 或 `科目二综合赛道`
-- 切到**环形道路**：点「开始」/「暂停」控制行驶
-- 切到**科目二综合赛道**：点「开始考试」按钮，小车在同一条赛道上依次完成
-  `倒车入库 → 侧方停车 → 直角转弯`，每完成一项在车顶文本与面板显示进度，
-  全部完成提示「考试合格」
-- 「重置小车」把车放回当前地图起点，「清除轨迹」保持不变
+- 右侧 `SDC HUD 面板` 点击「切换到手动 (WASD)」进入手动模式
+- 手动模式下，**点击面板使其获得键盘焦点**，然后按住 `W/S/A/D` 控制小车
+- 松开按键即松开油门 / 回正转向；点击「切换到自动」回到自动驾驶
 
 **方式二：话题控制**
 ```bash
-# 切换地图（0=环形道路 1=科目二综合赛道）
-ros2 topic pub --once /sdc/set_map std_msgs/msg/Int32 "{data: 1}"
-# 开始行驶（环形道路用）
+# 切换到手动驾驶
+ros2 topic pub --once /sdc/set_mode std_msgs/msg/Int32 "{data: 1}"
+# 切换到自动驾驶
+ros2 topic pub --once /sdc/set_mode std_msgs/msg/Int32 "{data: 0}"
+# 手动控制指令（W=前进 throttle=+1，S=倒车 throttle=-1，A=左转 steer=-1，D=右转 steer=+1）
+ros2 topic pub --rate 20 /sdc/manual_cmd geometry_msgs/msg/Twist "{linear: {x: 1.0}, angular: {z: 0.0}}"
+# 开始行驶 / 暂停
 ros2 topic pub --once /sdc/start std_msgs/msg/Bool "{data: true}"
-# 暂停/继续行驶
 ros2 topic pub --once /sdc/pause std_msgs/msg/Bool "{data: true}"
-# 开始科目二考试
-ros2 topic pub --once /sdc/start_exam std_msgs/msg/Bool "{data: true}"
-# 重置小车到当前地图起点
+# 重置小车到环形起点
 ros2 topic pub --once /sdc/reset_car std_msgs/msg/Bool "{data: true}"
 ```
 
-考试状态可通过话题查看：
-- `/sdc/exam_status`（`String`，如「考试合格！全部科目完成」）
-- `/sdc/exam_progress`（`String`，如「1/3」）
-- `/sdc/exam_item`（`Int32`，当前科目序号，-1=无）
-
-> 实现说明：科目二综合赛道（`ExamTrackMap`）把 3 个科目都布置在同一条道路上，
-> 通过「航点」依次推进，**不切换地图**。科目二赛道**无障碍物**（`to_obstacles()`
-> 返回空），车只沿目标点循迹；环形道路才保留随机障碍避障。
-> 倒车入库通过阿克曼模型负车速实现倒车。
+驾驶模式可通过 `/sdc/mode`（`Int32`，0=自动 1=手动）话题查看。
 
 ## 切换速度控制算法
 
@@ -189,7 +185,7 @@ cmake .. && make
 - [x] 加入 PID 速度控制（含 Bang-Bang / Ramp 多种算法，可实时切换）
 - [x] 加入局部路径规划避障（Lattice Planner，RViz 可视化候选与最优路径）
 - [x] 随机动态障碍物系统（RViz 实时显示）
-- [x] 可切换地图（环形道路 / 科目二综合赛道）
-- [x] 科目二模拟考试（3 个科目在同一条道路上，HUD 开始考试，逐项完成并提示）
+- [x] 环形道路增加复杂性（S 形绕桩 / 窄门 / 路障 / 多车道标线）
+- [x] 自动 / 手动（WASD）双驾驶模式
 - [ ] 接入真实传感器（超声波 / 激光雷达）数据
 - [ ] 扩展为 Gazebo 物理仿真

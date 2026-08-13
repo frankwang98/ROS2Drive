@@ -36,48 +36,127 @@ std::vector<Obstacle> ScenarioMap::wall_obstacles(
 // ============ 类型名 ============
 const char* map_type_name(MapType t) {
   switch (t) {
-    case MapType::kRing:       return "Ring";
-    case MapType::kExamTrack:  return "ExamTrack";
+    case MapType::kRing: return "Ring";
   }
   return "Unknown";
 }
 
 const char* map_type_label(MapType t) {
   switch (t) {
-    case MapType::kRing:       return "环形道路";
-    case MapType::kExamTrack:  return "科目二综合赛道";
+    case MapType::kRing: return "环形道路";
   }
   return "?";
 }
 
 std::unique_ptr<ScenarioMap> create_map(MapType t) {
   switch (t) {
-    case MapType::kRing:       return std::make_unique<RingMap>();
-    case MapType::kExamTrack:  return std::make_unique<ExamTrackMap>();
+    case MapType::kRing: return std::make_unique<RingMap>();
   }
   return std::make_unique<RingMap>();
 }
 
 // =====================================================================
-//  RingMap（环形道路，原逻辑迁移）
+//  RingMap（环形道路，含复杂路型）
 // =====================================================================
 RingMap::RingMap(double radius, double road_width)
     : radius_(radius), road_width_(road_width) {}
 
+Vec2 RingMap::point_on_ring(double angle) const {
+  return Vec2{radius_ * std::cos(angle), radius_ * std::sin(angle)};
+}
+
+Vec2 RingMap::point_on_ring(double angle, double lateral) const {
+  // 法线方向（径向，向外为正）
+  double nx = std::cos(angle), ny = std::sin(angle);
+  double r = radius_ + lateral;
+  return Vec2{r * nx, r * ny};
+}
+
 void RingMap::reset(CarState& car) const {
-  // 起点位于环道东侧（角度 0），朝向切线方向（π/2）
+  // 起点位于环道东侧（角度 0），朝向切线方向（π/2，即沿环逆时针行驶）
   car.reset(radius_, 0.0, M_PI_2, 0.0, 0.0);
 }
 
 Vec2 RingMap::goal_point(double /*progress*/) const {
-  // 环形无终点，返回一个沿切线前方的虚拟点（自动行驶不会真正用到）
-  return Vec2{radius_, radius_ * 0.1};
+  // 环形无终点，返回一个沿切线前方的虚拟点（自动行驶沿环前进）
+  return Vec2{radius_, radius_ * 0.12};
 }
 
 bool RingMap::goal_reached(const CarState& /*car*/) const {
   return false;  // 环道为无限行驶，不判定完成
 }
 
+// ---- 静态路况障碍物（slalom 桩桶 / 窄门 / 路障） ----
+// 自动/手动驾驶都会把它们当作障碍物参与避障与 LIDAR。
+std::vector<Obstacle> RingMap::to_obstacles() const {
+  std::vector<Obstacle> obs;
+
+  // 1. 内外环边界墙（防止冲出道路）
+  double inner_r = radius_ - road_width_ / 2.0;
+  double outer_r = radius_ + road_width_ / 2.0;
+  std::vector<std::array<double, 4>> segs;
+  constexpr int N = 160;
+  for (int k = 0; k < 2; ++k) {
+    double r = (k == 0) ? inner_r : outer_r;
+    for (int i = 0; i < N; ++i) {
+      double a0 = 2.0 * M_PI * i / N;
+      double a1 = 2.0 * M_PI * (i + 1) / N;
+      segs.push_back({r * std::cos(a0), r * std::sin(a0),
+                      r * std::cos(a1), r * std::sin(a1)});
+    }
+  }
+  auto walls = wall_obstacles(segs, 0.45, 1.2);
+  obs.insert(obs.end(), walls.begin(), walls.end());
+
+  // 2. S 形绕桩路段（约在角度 130°~200°，西南区域）：
+  //    一排交替内/外侧的桩桶，车辆需蛇形穿梭。
+  {
+    const double a0 = 130.0 * M_PI / 180.0;
+    const double a1 = 200.0 * M_PI / 180.0;
+    constexpr int kCones = 7;
+    double half = road_width_ / 2.0 - 1.2;  // 横向偏移极限（避开边界墙）
+    for (int i = 0; i < kCones; ++i) {
+      double t = static_cast<double>(i) / (kCones - 1);
+      double ang = a0 + (a1 - a0) * t;
+      // 交替内/外侧偏移（负=向内，正=向外）
+      double lat = (i % 2 == 0) ? -half * 0.55 : half * 0.55;
+      Vec2 p = point_on_ring(ang, lat);
+      obs.push_back(Obstacle{p, 0.55});  // 桩桶
+    }
+  }
+
+  // 3. 窄门路段（约在角度 20°~50°，东北区域）：
+  //    两侧各一道短墙，把通道收窄到约 3m，考验居中控制。
+  {
+    const double a_lo = 20.0 * M_PI / 180.0;
+    const double a_hi = 50.0 * M_PI / 180.0;
+    const double lat_gap = 1.6;  // 门洞距中心线横向偏移（门洞宽约 2*lat_gap）
+    const double wall_len = 0.28;  // 墙的角度跨度（弧度）
+    constexpr int kSeg = 8;
+    // 内墙（向内收窄）
+    for (int i = 0; i < kSeg; ++i) {
+      double a = a_lo + (a_hi - a_lo) * i / (kSeg - 1);
+      Vec2 p = point_on_ring(a, -lat_gap);
+      obs.push_back(Obstacle{p, 0.5});
+    }
+    // 外墙（向外收窄）
+    for (int i = 0; i < kSeg; ++i) {
+      double a = a_lo + (a_hi - a_lo) * i / (kSeg - 1);
+      Vec2 p = point_on_ring(a, lat_gap);
+      obs.push_back(Obstacle{p, 0.5});
+    }
+  }
+
+  // 4. 静态路障（约在角度 300°，东南区域）：单个大路障，需绕行。
+  {
+    Vec2 p = point_on_ring(300.0 * M_PI / 180.0, 0.4);
+    obs.push_back(Obstacle{p, 1.1});
+  }
+
+  return obs;
+}
+
+// ---- 道路绘制 ----
 MarkerArray RingMap::build_road_markers() const {
   MarkerArray ma;
   double inner_r = radius_ - road_width_ / 2.0;
@@ -104,32 +183,55 @@ MarkerArray RingMap::build_road_markers() const {
     }
     ma.markers.push_back(m);
   }
-  // 中央虚线
-  {
+
+  // 中央双黄线（虚线，双线增强视觉）
+  for (int line = 0; line < 2; ++line) {
     Marker m;
     m.header.frame_id = "world";
-    m.ns = "road"; m.id = 1;
+    m.ns = "road"; m.id = 1 + line;
     m.type = Marker::LINE_LIST; m.action = Marker::ADD;
     m.pose.orientation.w = 1.0;
-    m.scale.x = 0.15;
-    m.color.r = 1.0f; m.color.g = 1.0f; m.color.b = 1.0f; m.color.a = 0.9f;
-    constexpr int DASH = 100;
+    m.scale.x = 0.12;
+    m.color.r = 1.0f; m.color.g = 0.85f; m.color.b = 0.2f; m.color.a = 0.9f;
+    constexpr int DASH = 120;
+    double dash_r = radius_ + (line == 0 ? -0.35 : 0.35);
     for (int i = 0; i < DASH; ++i) {
       double a0 = 2.0 * M_PI * i / DASH;
       double a1 = 2.0 * M_PI * (i + 0.5) / DASH;
-      m.points.push_back(make_point(radius_ * std::cos(a0), radius_ * std::sin(a0), z));
-      m.points.push_back(make_point(radius_ * std::cos(a1), radius_ * std::sin(a1), z));
+      m.points.push_back(make_point(dash_r * std::cos(a0), dash_r * std::sin(a0), z));
+      m.points.push_back(make_point(dash_r * std::cos(a1), dash_r * std::sin(a1), z));
     }
     ma.markers.push_back(m);
   }
-  // 内/外边界
+
+  // 车道引导线（把车道细分出内/中/外三车道的虚线）——增强路感
+  for (int k = 1; k <= 2; ++k) {
+    Marker m;
+    m.header.frame_id = "world";
+    m.ns = "lane"; m.id = k;
+    m.type = Marker::LINE_LIST; m.action = Marker::ADD;
+    m.pose.orientation.w = 1.0;
+    m.scale.x = 0.08;
+    m.color.r = 1.0f; m.color.g = 1.0f; m.color.b = 1.0f; m.color.a = 0.5f;
+    double lane_r = radius_ + (k == 1 ? -road_width_ / 4.0 : road_width_ / 4.0);
+    constexpr int DASH = 140;
+    for (int i = 0; i < DASH; ++i) {
+      double a0 = 2.0 * M_PI * i / DASH;
+      double a1 = 2.0 * M_PI * (i + 0.4) / DASH;
+      m.points.push_back(make_point(lane_r * std::cos(a0), lane_r * std::sin(a0), z));
+      m.points.push_back(make_point(lane_r * std::cos(a1), lane_r * std::sin(a1), z));
+    }
+    ma.markers.push_back(m);
+  }
+
+  // 内/外边界（实线白边）
   for (int k = 0; k < 2; ++k) {
     Marker m;
     m.header.frame_id = "world";
-    m.ns = "road"; m.id = 2 + k;
+    m.ns = "road"; m.id = 10 + k;
     m.type = Marker::LINE_STRIP; m.action = Marker::ADD;
     m.pose.orientation.w = 1.0;
-    m.scale.x = 0.25;
+    m.scale.x = 0.3;
     m.color.r = 1.0f; m.color.g = 1.0f; m.color.b = 1.0f; m.color.a = 0.95f;
     double r = (k == 0) ? inner_r : outer_r;
     for (int i = 0; i <= segments_; ++i) {
@@ -138,254 +240,61 @@ MarkerArray RingMap::build_road_markers() const {
     }
     ma.markers.push_back(m);
   }
-  return ma;
-}
 
-std::vector<Obstacle> RingMap::to_obstacles() const {
-  // 环道边界墙（内外侧各一圈圆），复用避障，防止冲出环道
-  double inner_r = radius_ - road_width_ / 2.0;
-  double outer_r = radius_ + road_width_ / 2.0;
-  std::vector<std::array<double, 4>> segs;
-  constexpr int N = 120;
-  for (int k = 0; k < 2; ++k) {
-    double r = (k == 0) ? inner_r : outer_r;
-    for (int i = 0; i < N; ++i) {
-      double a0 = 2.0 * M_PI * i / N;
-      double a1 = 2.0 * M_PI * (i + 1) / N;
-      segs.push_back({r * std::cos(a0), r * std::sin(a0),
-                      r * std::cos(a1), r * std::sin(a1)});
-    }
-  }
-  return wall_obstacles(segs, 0.4, 1.2);
-}
-
-// =====================================================================
-//  ExamTrackMap（科目二综合赛道：一条道路上布置 3 个科目）
-// =====================================================================
-ExamTrackMap::ExamTrackMap() {
-  // 主路：横向道路 y∈[-4,4]，x∈[-26,24]，车从左侧进入向东行驶。
-  // 每个站点由一组航点描述；到达该组最后一个航点后 advance() 会
-  // 返回 true，表示该科目完成。
-  //
-  // 站点 0：倒车入库 —— 主路南侧库位
-  //   航点0：主路上库位正北的进入点（车从主路向南驶入库位）
-  //   航点1：库位内侧（倒车终点）
-  //   航点2：回到主路（出库）
-  //
-  // 站点 1：侧方停车 —— 主路南侧长条库位
-  //   航点3：主路上库位进入点
-  //   航点4：库位内
-  //   航点5：回到主路
-  //
-  // 站点 2：直角转弯 —— 主路东端 L 形弯道
-  //   航点6：弯道前主路
-  //   航点7：L 形弯道出口（向上）
-  waypoints_ = {
-      // 站点 0 倒车入库
-      {Vec2{-14.0, -2.0}, false},   // wp0 主路进入点（车朝南）
-      {Vec2{-14.0, -8.5}, false},   // wp1 库内（倒车入库）
-      {Vec2{-14.0, -2.0}, true},    // wp2 出库回到主路（倒车）
-      // 站点 1 侧方停车
-      {Vec2{-2.0, -2.0}, false},    // wp3 主路进入点
-      {Vec2{-2.0, -8.5}, false},    // wp4 侧方库内
-      {Vec2{-2.0, -2.0}, true},     // wp5 回到主路（倒车）
-      // 站点 2 直角转弯
-      {Vec2{12.0, -2.0}, false},    // wp6 弯道前主路
-      {Vec2{16.0, 11.0}, false},    // wp7 L 形弯道出口
-  };
-}
-
-void ExamTrackMap::reset(CarState& car) const {
-  // 赛道起点：主路左端，车头朝东（+x）
-  car.reset(ROAD_LEFT_ + 1.0, 0.0, 0.0, 0.0, 0.0);
-}
-
-Vec2 ExamTrackMap::goal_point(double /*progress*/) const {
-  if (current_wp_ < 0 || current_wp_ >= static_cast<int>(waypoints_.size()))
-    return Vec2{ROAD_RIGHT_, 0.0};
-  return waypoints_[current_wp_].pos;
-}
-
-bool ExamTrackMap::goal_reached(const CarState& car) const {
-  if (current_wp_ < 0 || current_wp_ >= static_cast<int>(waypoints_.size()))
-    return false;
-  const Vec2& g = waypoints_[current_wp_].pos;
-  // 最后一段（直角转弯出口）用更宽判据
-  double tol = (current_wp_ == 7) ? 2.5 : 1.3;
-  return std::hypot(car.x() - g.x, car.y() - g.y) < tol;
-}
-
-bool ExamTrackMap::current_allow_reverse() const {
-  if (current_wp_ < 0 || current_wp_ >= static_cast<int>(waypoints_.size()))
-    return false;
-  return waypoints_[current_wp_].allow_reverse;
-}
-
-int ExamTrackMap::current_station() const {
-  for (int s = 0; s < 3; ++s) {
-    if (current_wp_ >= station_start_[s] && current_wp_ < station_start_[s + 1])
-      return s;
-  }
-  return 0;
-}
-
-bool ExamTrackMap::advance() {
-  // 已是最后一个航点：到达即完成最后一个科目（直角转弯）
-  if (current_wp_ >= static_cast<int>(waypoints_.size()) - 1)
-    return true;
-  ++current_wp_;
-  // 判断是否跨越站点边界
-  for (int s = 1; s <= 3; ++s) {
-    if (current_wp_ == station_start_[s])
-      return true;  // 刚进入新站点，说明上一个站点完成
-  }
-  return false;
-}
-
-void ExamTrackMap::reset_to_station(int station) {
-  if (station < 0) station = 0;
-  if (station > 2) station = 2;
-  current_wp_ = station_start_[station];
-}
-
-const char* ExamTrackMap::station_name(int station) {
-  switch (station) {
-    case 0: return "倒车入库";
-    case 1: return "侧方停车";
-    case 2: return "直角转弯";
-  }
-  return "?";
-}
-
-// 画一条横向主路路面（y 从 bottom 到 top）
-static void add_road_quad(MarkerArray& ma, const std::string& ns, int id,
-                          double x0, double x1, double y0, double y1) {
-  Marker m;
-  m.header.frame_id = "world";
-  m.ns = ns; m.id = id;
-  m.type = Marker::TRIANGLE_LIST; m.action = Marker::ADD;
-  m.pose.orientation.w = 1.0;
-  m.color.r = 0.2f; m.color.g = 0.2f; m.color.b = 0.25f; m.color.a = 0.82f;
-  m.points.push_back(ScenarioMap::make_point(x0, y0, 0.0));
-  m.points.push_back(ScenarioMap::make_point(x1, y0, 0.0));
-  m.points.push_back(ScenarioMap::make_point(x1, y1, 0.0));
-  m.points.push_back(ScenarioMap::make_point(x0, y0, 0.0));
-  m.points.push_back(ScenarioMap::make_point(x1, y1, 0.0));
-  m.points.push_back(ScenarioMap::make_point(x0, y1, 0.0));
-  ma.markers.push_back(m);
-}
-
-// 画一个矩形框（库位/区域），color 控制
-static void add_rect_frame(MarkerArray& ma, const std::string& ns, int id,
-                           double cx, double cy, double w, double h,
-                           float r, float g, float b) {
-  double x0 = cx - w / 2, x1 = cx + w / 2;
-  double y0 = cy - h / 2, y1 = cy + h / 2;
-  Marker m;
-  m.header.frame_id = "world";
-  m.ns = ns; m.id = id;
-  m.type = Marker::LINE_STRIP; m.action = Marker::ADD;
-  m.pose.orientation.w = 1.0;
-  m.scale.x = 0.2;
-  m.color.r = r; m.color.g = g; m.color.b = b; m.color.a = 0.95f;
-  double z = 0.06;
-  m.points.push_back(ScenarioMap::make_point(x0, y0, z));
-  m.points.push_back(ScenarioMap::make_point(x1, y0, z));
-  m.points.push_back(ScenarioMap::make_point(x1, y1, z));
-  m.points.push_back(ScenarioMap::make_point(x0, y1, z));
-  m.points.push_back(ScenarioMap::make_point(x0, y0, z));
-  ma.markers.push_back(m);
-}
-
-// 画一条直线段
-static void add_line(MarkerArray& ma, const std::string& ns, int id,
-                     double x0, double y0, double x1, double y1,
-                     float r, float g, float b, double scale = 0.18) {
-  Marker m;
-  m.header.frame_id = "world";
-  m.ns = ns; m.id = id;
-  m.type = Marker::LINE_STRIP; m.action = Marker::ADD;
-  m.pose.orientation.w = 1.0;
-  m.scale.x = scale;
-  m.color.r = r; m.color.g = g; m.color.b = b; m.color.a = 0.9f;
-  double z = 0.06;
-  m.points.push_back(ScenarioMap::make_point(x0, y0, z));
-  m.points.push_back(ScenarioMap::make_point(x1, y1, z));
-  ma.markers.push_back(m);
-}
-
-MarkerArray ExamTrackMap::build_road_markers() const {
-  MarkerArray ma;
-  constexpr double TOP = 4.0, BOT = -4.0;
-  constexpr double LEFT = -26.0, RIGHT = 24.0;
-
-  // ---- 主路路面（横向道路） ----
-  add_road_quad(ma, "road", 0, LEFT, RIGHT, BOT, TOP);
-
-  // ---- 主路边界白线 ----
-  add_line(ma, "road", 1, LEFT, BOT, RIGHT, BOT, 1, 1, 1);
-  add_line(ma, "road", 2, LEFT, TOP, RIGHT, TOP, 1, 1, 1);
-  // 中央虚线
+  // 人行横道（斑马线）—— 东南角视觉细节
   {
     Marker m;
     m.header.frame_id = "world";
-    m.ns = "road"; m.id = 3;
-    m.type = Marker::LINE_LIST; m.action = Marker::ADD;
+    m.ns = "cross"; m.id = 0;
+    m.type = Marker::TRIANGLE_LIST; m.action = Marker::ADD;
     m.pose.orientation.w = 1.0;
-    m.scale.x = 0.12;
-    m.color.r = 1.0f; m.color.g = 1.0f; m.color.b = 1.0f; m.color.a = 0.8f;
-    double z = 0.06;
-    constexpr double DASH = 3.0;
-    for (double x = LEFT; x < RIGHT; x += DASH) {
-      m.points.push_back(make_point(x, 0.0, z));
-      m.points.push_back(make_point(std::min(x + DASH / 2, RIGHT), 0.0, z));
+    m.color.r = 1.0f; m.color.g = 1.0f; m.color.b = 1.0f; m.color.a = 0.7f;
+    const double a_center = 305.0 * M_PI / 180.0;
+    const double span = 0.12;      // 斑马线角度跨度
+    constexpr int kStripes = 6;
+    for (int i = 0; i < kStripes; ++i) {
+      double a = a_center + (i - kStripes / 2.0) * span;
+      double a2 = a + span * 0.5;
+      double in = inner_r + 0.4, out = outer_r - 0.4;
+      auto p1 = Vec2{in * std::cos(a), in * std::sin(a)};
+      auto p2 = Vec2{out * std::cos(a), out * std::sin(a)};
+      auto p3 = Vec2{out * std::cos(a2), out * std::sin(a2)};
+      auto p4 = Vec2{in * std::cos(a2), in * std::sin(a2)};
+      m.points.push_back(make_point(p1.x, p1.y, 0.0));
+      m.points.push_back(make_point(p2.x, p2.y, 0.0));
+      m.points.push_back(make_point(p3.x, p3.y, 0.0));
+      m.points.push_back(make_point(p1.x, p1.y, 0.0));
+      m.points.push_back(make_point(p3.x, p3.y, 0.0));
+      m.points.push_back(make_point(p4.x, p4.y, 0.0));
     }
     ma.markers.push_back(m);
   }
 
-  // ---- 站点 1：倒车入库（库位南侧，y≈-11） ----
-  // 库位开口朝北（对准主路），从主路向南驶入
-  {
-    // 库位地面
-    add_road_quad(ma, "bay", 10, -17.0, -11.0, -15.0, -7.0);
-    // 库位黄线（三面 + 开口朝北）
-    add_rect_frame(ma, "bay", 11, -14.0, -11.0, 6.0, 8.0, 1.0f, 0.9f, 0.2f);
-  }
-
-  // ---- 站点 2：侧方停车（主路南侧长条库位） ----
-  {
-    add_road_quad(ma, "bay", 12, -6.0, 2.0, -11.0, -7.8);
-    add_rect_frame(ma, "bay", 13, -2.0, -9.4, 8.0, 3.2, 1.0f, 0.9f, 0.2f);
-  }
-
-  // ---- 站点 3：直角转弯（主路东端 L 形弯道） ----
-  {
-    // 竖向路面（北向出口）
-    add_road_quad(ma, "road", 14, 13.0, 19.0, TOP, 15.0);
-    // 内/外边界
-    add_line(ma, "road", 15, 13.0, TOP, 13.0, 15.0, 1, 1, 1);   // 内线
-    add_line(ma, "road", 16, 19.0, TOP, 19.0, 15.0, 1, 1, 1);   // 外线
-    add_line(ma, "road", 17, 13.0, 15.0, 19.0, 15.0, 1, 1, 1);  // 顶端线
-  }
-
   return ma;
 }
 
-MarkerArray ExamTrackMap::build_extra_markers() const {
+// ---- 复杂路况标识（文字标注） ----
+MarkerArray RingMap::build_extra_markers() const {
   MarkerArray ma;
-  // 各站点名称文字
-  const char* names[] = {"倒车入库", "侧方停车", "直角转弯"};
-  double px[] = {-14.0, -2.0, 16.0};
-  double py[] = {-16.0, -12.5, 16.5};
+  // 减速带 / 绕桩 / 窄门 等提示文字
+  const struct { double angle; double lat; const char* text; } tags[] = {
+      {130.0,  road_width_ / 2.0 + 1.2, "绕桩区"},
+      {20.0,   road_width_ / 2.0 + 1.2, "窄门"},
+      {300.0,  road_width_ / 2.0 + 1.2, "减速带"},
+  };
   for (int i = 0; i < 3; ++i) {
     Marker m;
     m.header.frame_id = "world";
     m.ns = "label"; m.id = i;
     m.type = Marker::TEXT_VIEW_FACING; m.action = Marker::ADD;
-    m.pose.position.x = px[i]; m.pose.position.y = py[i]; m.pose.position.z = 1.5;
+    double a = tags[i].angle * M_PI / 180.0;
+    double r = radius_ + tags[i].lat;
+    m.pose.position.x = r * std::cos(a);
+    m.pose.position.y = r * std::sin(a);
+    m.pose.position.z = 1.6;
     m.scale.z = 1.2;
-    m.color.r = 1.0f; m.color.g = 1.0f; m.color.b = 0.2f; m.color.a = 1.0f;
-    m.text = names[i];
+    m.color.r = 1.0f; m.color.g = 0.85f; m.color.b = 0.2f; m.color.a = 1.0f;
+    m.text = tags[i].text;
     ma.markers.push_back(m);
   }
   return ma;

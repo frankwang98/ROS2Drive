@@ -18,9 +18,8 @@ namespace sdc {
 /// → Stanley 转向 → 阿克曼积分」封装成通用接口，使小车能**自动循迹行驶**。
 ///
 /// - 环道模式：target 为沿切线前方的虚拟点（无限行驶，避障 + 沿环）。
-/// - 考试模式：target 为当前科目目标点（如库位中心），抵达即判完成。
 ///
-/// 倒车：speed_cmd 可传负值（阿克曼模型支持），用于倒车入库等场景。
+/// 倒车：speed_cmd 可传负值（阿克曼模型支持），用于倒车行驶。
 class AutoDriver {
  public:
   struct StepResult {
@@ -39,16 +38,26 @@ class AutoDriver {
   void set_extra_obstacles(const std::vector<Obstacle>& obs) { extra_obstacles_ = obs; }
 
   /// 推进一个仿真步。
-  /// @param target 期望行驶目标点（世界坐标）；考试中为科目目标
-  /// @param allow_reverse 是否允许倒车（倒车入库设为 true）
+  /// @param target 期望行驶目标点（世界坐标）
+  /// @param allow_reverse 是否允许倒车（当目标在车体后方时）
   /// @param dt 时间步长（秒）
   StepResult step(const Vec2& target, bool allow_reverse, double dt);
+
+  /// 手动驾驶：直接由键盘指令控制（W/S 油门/倒车，A/D 转向）。
+  /// @param throttle 油门（>0 前进加速，<0 倒车），-1..1
+  /// @param steer_cmd 转向指令（-1..1，负=左 正=右）
+  /// @param dt 时间步长
+  /// @return 当前车速（m/s）
+  double manual_step(double throttle, double steer_cmd, double dt);
 
   // 直接访问小车状态（用于可视化 / TF）
   CarState& car() { return car_; }
   const CarState& car() const { return car_; }
 
   double speed() const { return speed_; }
+
+  /// 手动模式下是否处于倒车（用于可视化箭头）。
+  bool reversing() const { return reversing_; }
 
   /// 重置小车到地图起点并清零状态。
   void reset(const ScenarioMap* map);
@@ -73,6 +82,7 @@ class AutoDriver {
   LatticePlanner lattice_planner_;
 
   double speed_{0.0};
+  bool   reversing_{false};
   std::vector<LatticeTrajectory> candidates_;
   std::vector<Obstacle> extra_obstacles_;
 
@@ -80,8 +90,10 @@ class AutoDriver {
   double front_obstacle_distance(const std::vector<Obstacle>& obs,
                                  double car_x, double car_y, double car_yaw) const;
 
-  // 沿环/路径取前视目标点（考试时不使用，考试直接用科目目标）
+  // 沿环/路径取前视目标点
   static double target_speed_for_action(Action a);
+  // 手动模式下用最大转向角
+  double max_steer_rad() const;
 };
 
 }  // namespace sdc

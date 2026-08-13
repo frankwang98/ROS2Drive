@@ -19,6 +19,7 @@ AutoDriver::AutoDriver() = default;
 void AutoDriver::reset(const ScenarioMap* map) {
   map_ = map;
   speed_ = 0.0;
+  reversing_ = false;
   candidates_.clear();
   if (map) map->reset(car_);
 }
@@ -62,7 +63,7 @@ AutoDriver::StepResult AutoDriver::step(const Vec2& target, bool allow_reverse,
   Action action = decision_maker_.decide(front_dist);
 
   // 5. 速度控制
-  //    考试中：抵达目标附近则减速停车；否则按决策速度。
+  //    抵达目标附近则减速停车；否则按决策速度。
   double target_speed = target_speed_for_action(action);
   double d_to_goal = std::hypot(target.x - car_x, target.y - car_y);
   if (d_to_goal < 2.5) target_speed = std::min(target_speed, 0.8);
@@ -93,6 +94,38 @@ AutoDriver::StepResult AutoDriver::step(const Vec2& target, bool allow_reverse,
   res.goal_reached = map_->goal_reached(car_);
 
   return res;
+}
+
+double AutoDriver::max_steer_rad() const {
+  // 手动驾驶转向范围：与阿克曼模型最大转角一致（约 ±0.55 rad）
+  return 0.55;
+}
+
+double AutoDriver::manual_step(double throttle, double steer_cmd, double dt) {
+  // 手动模式：直接由键盘指令控制车速与转向，绕过自动决策/避障规划。
+  // throttle: 目标油门 (-1..1)。>0 前进，<0 倒车。
+  //   前进：车速向 max_speed*throttle 逼近；倒车：向反方向逼近。
+  constexpr double kMaxSpeed = 4.0;    // 手动最高车速（m/s）
+  constexpr double kAccel = 2.5;       // 加速/制动响应（m/s²）
+
+  // 1. 速度指令
+  double target_speed = throttle * kMaxSpeed;
+  double delta = target_speed - speed_;
+  double max_dv = kAccel * dt;
+  if (std::fabs(delta) > max_dv) {
+    speed_ += (delta > 0.0 ? max_dv : -max_dv);
+  } else {
+    speed_ = target_speed;
+  }
+
+  // 2. 转向指令（-1..1 -> 前轮转角，平滑逼近避免突变）
+  double steer = steer_cmd * max_steer_rad();
+  car_.update(speed_, steer, dt);
+
+  // 3. 记录倒车状态（用于可视化）
+  reversing_ = (speed_ < -0.1);
+
+  return speed_;
 }
 
 }  // namespace sdc
