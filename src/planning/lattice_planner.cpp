@@ -94,6 +94,12 @@ void LatticePlanner::plan(double pose_x, double pose_y, double yaw,
         if (d < min_d) min_d = d;
       }
     }
+    traj.clearance = (min_d == std::numeric_limits<double>::infinity())
+                         ? p_.obstacle_safe_dist : min_d;
+    // 沿轨迹的最小间距小于小车半宽则视为不可通行（相撞）。
+    // 注意：这里的 clearance 是「沿所选路径」的最小距离，而非车正前方直线距离，
+    // 因此窄门侧墙/绕桩桩桶这类可绕行/可穿过的障碍不会被误判为堵死。
+    traj.blocked = (min_d < 0.35);
     traj.speed = p_.max_speed;
     if (min_d < p_.obstacle_safe_dist && min_d > 0.0) {
       traj.speed = std::max(0.5, p_.max_speed * min_d / p_.obstacle_safe_dist);

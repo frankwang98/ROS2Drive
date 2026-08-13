@@ -1,5 +1,6 @@
 #include "sim/driver.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 namespace sdc {
@@ -53,18 +54,38 @@ AutoDriver::StepResult AutoDriver::step(const Vec2& target, bool allow_reverse,
   auto obstacles = map_->to_obstacles();
   obstacles.insert(obstacles.end(), extra_obstacles_.begin(), extra_obstacles_.end());
 
-  // 2. Lattice 局部规划避障
+  // 2. Lattice 局部规划避障：生成候选轨迹并选出最优（selected）轨迹。
   lattice_planner_.plan(car_x, car_y, car_yaw, obstacles, candidates_);
 
-  // 3. 前方距离感知
+  // 3. 前方距离感知（仅用于上报/可视化，不再直接决定是否停车）。
   double front_dist = front_obstacle_distance(obstacles, car_x, car_y, car_yaw);
 
-  // 4. 决策（基于前方距离）
-  Action action = decision_maker_.decide(front_dist);
+  // 4. 决策：以 Lattice 选中的局部路径是否可通行为准，而不是以车正前方
+  //    直线距离为准。窄门侧墙 / 绕桩桩桶这类「可绕行/可穿过」的障碍，
+  //    在选中路径上并不会挡住去路，因此不会误判为必须停车；只有当
+  //    选中路径也穿障（blocked）时才停车。
+  double plan_speed = lattice_planner_.max_speed();
+  bool   path_blocked = false;
+  for (const auto& c : candidates_) {
+    if (c.selected) {
+      plan_speed = c.speed;
+      path_blocked = c.blocked;
+      break;
+    }
+  }
+
+  Action action;
+  if (path_blocked) {
+    action = Action::kStop;   // 无可通行路径，停车
+  } else {
+    action = decision_maker_.decide_by_speed(plan_speed);
+  }
 
   // 5. 速度控制
   //    抵达目标附近则减速停车；否则按决策速度。
   double target_speed = target_speed_for_action(action);
+  // 若 Lattice 因靠近障碍已建议减速，则沿用更保守的速度。
+  if (!path_blocked) target_speed = std::min(target_speed, plan_speed);
   double d_to_goal = std::hypot(target.x - car_x, target.y - car_y);
   if (d_to_goal < 2.5) target_speed = std::min(target_speed, 0.8);
   if (d_to_goal < 0.8) target_speed = 0.0;
