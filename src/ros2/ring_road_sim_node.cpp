@@ -23,6 +23,8 @@
  *     /sdc/reset_car      (Bool)   把车放回环形起点
  *     /sdc/clear_trail    (Bool)   清除轨迹
  *     /sdc/control_algo   (Int32)  切换速度控制算法（自动）
+ *     /sdc/planning_algo  (Int32)  切换局部规划算法（0=Lattice 1=EM）
+ *     /sdc/lateral_algo   (Int32)  切换横向控制算法（0=Stanley 1=LQR 2=MPC）
  *   发布：
  *     /sdc/speed          (Float64) 当前车速
  *     /sdc/action_id      (Float64) 行为ID
@@ -55,6 +57,7 @@
 #include <tf2_ros/transform_broadcaster.h>
 
 #include "control/velocity_controller.hpp"
+#include "planning/em_planner.hpp"
 #include "planning/lattice_planner.hpp"
 #include "sim/driver.hpp"
 #include "sim/map.hpp"
@@ -135,8 +138,30 @@ public:
           if (a == 1)      driver_.velocity_ctrl().set_algorithm(VelocityAlgorithm::kBangBang);
           else if (a == 2) driver_.velocity_ctrl().set_algorithm(VelocityAlgorithm::kRamp);
           else             driver_.velocity_ctrl().set_algorithm(VelocityAlgorithm::kPid);
-          RCLCPP_INFO(get_logger(), "控制算法切换为: %s",
+          RCLCPP_INFO(get_logger(), "速度控制算法切换为: %s",
                       velocity_algorithm_name(driver_.velocity_ctrl().algorithm()));
+        });
+    // 切换局部规划算法（自动模式）
+    planning_sub_ = create_subscription<std_msgs::msg::Int32>(
+        "sdc/planning_algo", 10, [this](const std_msgs::msg::Int32::SharedPtr msg) {
+          int a = msg->data;
+          auto algo = (a == 1) ? AutoDriver::PlanningAlgorithm::kEm
+                               : AutoDriver::PlanningAlgorithm::kLattice;
+          driver_.set_planning_algorithm(algo);
+          RCLCPP_INFO(get_logger(), "局部规划算法切换为: %s",
+                      AutoDriver::planning_algorithm_name(algo));
+        });
+    // 切换横向控制算法（自动模式）
+    lateral_sub_ = create_subscription<std_msgs::msg::Int32>(
+        "sdc/lateral_algo", 10, [this](const std_msgs::msg::Int32::SharedPtr msg) {
+          int a = msg->data;
+          AutoDriver::LateralAlgorithm algo;
+          if (a == 1)      algo = AutoDriver::LateralAlgorithm::kLqr;
+          else if (a == 2) algo = AutoDriver::LateralAlgorithm::kMpc;
+          else             algo = AutoDriver::LateralAlgorithm::kStanley;
+          driver_.set_lateral_algorithm(algo);
+          RCLCPP_INFO(get_logger(), "横向控制算法切换为: %s",
+                      AutoDriver::lateral_algorithm_name(algo));
         });
     // 驾驶模式切换（0=自动 1=手动）
     set_mode_sub_ = create_subscription<std_msgs::msg::Int32>(
@@ -320,7 +345,11 @@ private:
     for (const auto& ob : obstacle_manager_.obstacles())
       obstacles.push_back(Obstacle{Vec2{ob.x, ob.y}, ob.radius});
     std::vector<LatticeTrajectory> candidates;
-    lattice_planner_.plan(cx, cy, cyaw, obstacles, candidates);
+    // 使用 driver 当前选中的规划算法生成候选（保证可视化与决策一致）
+    if (driver_.planning_algorithm() == AutoDriver::PlanningAlgorithm::kEm)
+      em_planner_.plan(cx, cy, cyaw, obstacles, candidates);
+    else
+      lattice_planner_.plan(cx, cy, cyaw, obstacles, candidates);
 
     visualization_msgs::msg::MarkerArray ma;
     int id = 0;
@@ -437,8 +466,10 @@ private:
       char buf[200];
       const char* mode_str = (mode_ == Mode::kManual) ? "手动(WASD)" : "自动";
       std::snprintf(buf, sizeof(buf),
-                    "模式:%s  v=%.1f m/s  %s",
-                    mode_str, driver_.speed(), action_name(last_action_));
+                    "模式:%s  v=%.1f m/s  %s  %s/%s",
+                    mode_str, driver_.speed(), action_name(last_action_),
+                    AutoDriver::planning_algorithm_name(driver_.planning_algorithm()),
+                    AutoDriver::lateral_algorithm_name(driver_.lateral_algorithm()));
       m.text = buf;
       ma.markers.push_back(m);
     }
@@ -472,6 +503,7 @@ private:
   AutoDriver driver_;
   ObstacleManager obstacle_manager_;
   LatticePlanner lattice_planner_;
+  EmPlanner em_planner_;
 
   Mode mode_{Mode::kAuto};
   double manual_throttle_{0.0};
@@ -503,6 +535,8 @@ private:
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr pause_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr clear_sub_;
   rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr algo_sub_;
+  rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr planning_sub_;
+  rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr lateral_sub_;
   rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr set_mode_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr manual_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr reset_sub_;

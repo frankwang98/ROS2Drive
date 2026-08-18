@@ -31,6 +31,9 @@ class SteeringController {
   double compute(double car_x, double car_y, double car_yaw,
                  double goal_x, double goal_y, double speed) const;
 
+  /// 重置内部状态（无内部状态，保留以统一接口）。
+  void reset() {}
+
  private:
   double clamp(double v, double lo, double hi) const { return std::fmin(hi, std::fmax(lo, v)); }
 

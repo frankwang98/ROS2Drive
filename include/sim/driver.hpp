@@ -3,10 +3,13 @@
 
 #include <vector>
 
+#include "control/lqr_controller.hpp"
+#include "control/mpc_controller.hpp"
 #include "control/steering_controller.hpp"
 #include "control/velocity_controller.hpp"
 #include "decision/decision_maker.hpp"
 #include "model/ackermann_model.hpp"
+#include "planning/em_planner.hpp"
 #include "planning/lattice_planner.hpp"
 #include "sim/map.hpp"
 
@@ -14,14 +17,23 @@ namespace sdc {
 
 /// 自动驾驶执行器。
 ///
-/// 把原仿真节点主循环里的「感知 → Lattice 局部规划避障 → 决策 → 速度控制
-/// → Stanley 转向 → 阿克曼积分」封装成通用接口，使小车能**自动循迹行驶**。
+/// 把原仿真节点主循环里的「感知 → 局部规划避障 → 决策 → 速度控制
+/// → 转向控制 → 阿克曼积分」封装成通用接口，使小车能**自动循迹行驶**。
+///
+/// 规控算法均可在运行时切换：
+///   - 局部规划：Lattice Planner（默认）/ EM Planner
+///   - 横向控制：Stanley（默认）/ LQR / MPC
+///   - 速度控制：PID / Bang-Bang / Ramp
 ///
 /// - 环道模式：target 为沿切线前方的虚拟点（无限行驶，避障 + 沿环）。
 ///
 /// 倒车：speed_cmd 可传负值（阿克曼模型支持），用于倒车行驶。
 class AutoDriver {
  public:
+  // ========== 规控算法类型 ==========
+  enum class PlanningAlgorithm { kLattice = 0, kEm = 1 };
+  enum class LateralAlgorithm { kStanley = 0, kLqr = 1, kMpc = 2 };
+
   struct StepResult {
     double speed = 0.0;       // 当前车速（m/s）
     double front_dist = 0.0;  // 前方最近障碍物距离（m）
@@ -50,6 +62,16 @@ class AutoDriver {
   /// @return 当前车速（m/s）
   double manual_step(double throttle, double steer_cmd, double dt);
 
+  // ========== 规控算法切换 ==========
+  static const char* planning_algorithm_name(PlanningAlgorithm a);
+  static const char* lateral_algorithm_name(LateralAlgorithm a);
+
+  void set_planning_algorithm(PlanningAlgorithm a) { planning_algo_ = a; }
+  PlanningAlgorithm planning_algorithm() const { return planning_algo_; }
+
+  void set_lateral_algorithm(LateralAlgorithm a) { lateral_algo_ = a; }
+  LateralAlgorithm lateral_algorithm() const { return lateral_algo_; }
+
   // 直接访问小车状态（用于可视化 / TF）
   CarState& car() { return car_; }
   const CarState& car() const { return car_; }
@@ -74,12 +96,25 @@ class AutoDriver {
   const VelocityController& velocity_ctrl() const { return velocity_controller_; }
 
  private:
+  /// 按当前规划算法执行局部规划，填充 candidates_。
+  void run_planner(double car_x, double car_y, double car_yaw,
+                   const std::vector<Obstacle>& obstacles);
+  /// 按当前横向控制算法计算前轮转角。
+  double compute_steer(double car_x, double car_y, double car_yaw,
+                       const Vec2& target, double speed_cmd, double dt);
+
   const ScenarioMap* map_{nullptr};
   CarState car_;
   DecisionMaker decision_maker_;
   VelocityController velocity_controller_;
   SteeringController steering_controller_;
+  LqrController lqr_controller_;
+  MpcController mpc_controller_;
   LatticePlanner lattice_planner_;
+  EmPlanner em_planner_;
+
+  PlanningAlgorithm planning_algo_{PlanningAlgorithm::kLattice};
+  LateralAlgorithm lateral_algo_{LateralAlgorithm::kStanley};
 
   double speed_{0.0};
   bool   reversing_{false};

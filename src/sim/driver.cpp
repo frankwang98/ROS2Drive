@@ -15,6 +15,23 @@ double AutoDriver::target_speed_for_action(Action a) {
   }
 }
 
+const char* AutoDriver::planning_algorithm_name(PlanningAlgorithm a) {
+  switch (a) {
+    case PlanningAlgorithm::kLattice: return "Lattice";
+    case PlanningAlgorithm::kEm:      return "EM";
+    default:                          return "?";
+  }
+}
+
+const char* AutoDriver::lateral_algorithm_name(LateralAlgorithm a) {
+  switch (a) {
+    case LateralAlgorithm::kStanley: return "Stanley";
+    case LateralAlgorithm::kLqr:     return "LQR";
+    case LateralAlgorithm::kMpc:     return "MPC";
+    default:                         return "?";
+  }
+}
+
 AutoDriver::AutoDriver() = default;
 
 void AutoDriver::reset(const ScenarioMap* map) {
@@ -22,7 +39,37 @@ void AutoDriver::reset(const ScenarioMap* map) {
   speed_ = 0.0;
   reversing_ = false;
   candidates_.clear();
+  steering_controller_.reset();
+  lqr_controller_.reset();
+  mpc_controller_.reset();
+  velocity_controller_.reset();
   if (map) map->reset(car_);
+}
+
+void AutoDriver::run_planner(double car_x, double car_y, double car_yaw,
+                             const std::vector<Obstacle>& obstacles) {
+  if (planning_algo_ == PlanningAlgorithm::kEm) {
+    em_planner_.plan(car_x, car_y, car_yaw, obstacles, candidates_);
+  } else {
+    lattice_planner_.plan(car_x, car_y, car_yaw, obstacles, candidates_);
+  }
+}
+
+double AutoDriver::compute_steer(double car_x, double car_y, double car_yaw,
+                                 const Vec2& target, double speed_cmd,
+                                 double dt) {
+  switch (lateral_algo_) {
+    case LateralAlgorithm::kLqr:
+      return lqr_controller_.compute(car_x, car_y, car_yaw,
+                                     target.x, target.y, speed_cmd);
+    case LateralAlgorithm::kMpc:
+      return mpc_controller_.compute(car_x, car_y, car_yaw,
+                                     target.x, target.y, speed_cmd, dt);
+    case LateralAlgorithm::kStanley:
+    default:
+      return steering_controller_.compute(car_x, car_y, car_yaw,
+                                          target.x, target.y, speed_cmd);
+  }
 }
 
 double AutoDriver::front_obstacle_distance(const std::vector<Obstacle>& obs,
@@ -54,8 +101,8 @@ AutoDriver::StepResult AutoDriver::step(const Vec2& target, bool allow_reverse,
   auto obstacles = map_->to_obstacles();
   obstacles.insert(obstacles.end(), extra_obstacles_.begin(), extra_obstacles_.end());
 
-  // 2. Lattice 局部规划避障：生成候选轨迹并选出最优（selected）轨迹。
-  lattice_planner_.plan(car_x, car_y, car_yaw, obstacles, candidates_);
+  // 2. 局部规划避障：按当前规划算法生成候选轨迹并选出最优（selected）轨迹。
+  run_planner(car_x, car_y, car_yaw, obstacles);
 
   // 3. 前方距离感知（仅用于上报/可视化，不再直接决定是否停车）。
   double front_dist = front_obstacle_distance(obstacles, car_x, car_y, car_yaw);
@@ -92,9 +139,8 @@ AutoDriver::StepResult AutoDriver::step(const Vec2& target, bool allow_reverse,
 
   double speed_cmd = velocity_controller_.update(target_speed, speed_, dt);
 
-  // 6. 转向：Stanley 跟踪目标点
-  double steer = steering_controller_.compute(
-      car_x, car_y, car_yaw, target.x, target.y, speed_cmd);
+  // 6. 转向：按当前横向控制算法跟踪目标点
+  double steer = compute_steer(car_x, car_y, car_yaw, target, speed_cmd, dt);
 
   // 7. 倒车判定：目标在车体后方（与前进方向夹角 > 90°）且允许倒车
   double to_goal_x = target.x - car_x;
