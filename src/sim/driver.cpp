@@ -34,6 +34,13 @@ const char* AutoDriver::lateral_algorithm_name(LateralAlgorithm a) {
 
 AutoDriver::AutoDriver() = default;
 
+void AutoDriver::set_use_behavior_tree(bool on) {
+  if (on && !behavior_tree_.initialized()) {
+    behavior_tree_.init();
+  }
+  use_behavior_tree_ = on;
+}
+
 void AutoDriver::reset(const ScenarioMap* map) {
   map_ = map;
   speed_ = 0.0;
@@ -124,6 +131,15 @@ AutoDriver::StepResult AutoDriver::step(const Vec2& target, bool allow_reverse,
   Action action;
   if (path_blocked) {
     action = Action::kStop;   // 无可通行路径，停车
+  } else if (use_behavior_tree_) {
+    // 行为树（BehaviorTree.CPP v3）基础行为切换：
+    // 以选中路径的建议速度换算成前方等效距离，驱动行为树决策。
+    // plan_speed 低说明靠近障碍，将其映射为距离供条件节点判定。
+    double bt_dist = 10.0;
+    if (plan_speed < 1.0)      bt_dist = 1.0;   // 接近停车
+    else if (plan_speed < 2.0) bt_dist = 3.0;   // 减速区间
+    else if (plan_speed < 2.5) bt_dist = 6.0;   // 巡航区间
+    action = behavior_tree_.tick(bt_dist);
   } else {
     action = decision_maker_.decide_by_speed(plan_speed);
   }
