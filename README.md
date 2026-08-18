@@ -16,7 +16,9 @@
   - **多车道标线 / 双黄线 / 人行横道** 等路面细节增强路感
 - **随机障碍物系统**：在环形道路上随机生成 / 消失障碍物（位置、大小、存活时长随机），RViz 中以红色方块实时显示
 - **Lattice 局部规划避障**：基于 lattice 采样生成多条候选局部路径，根据与障碍物的距离与横向偏移评估代价，选择最优避障轨迹，并在 RViz 中显示候选路径（灰）与选中的最优路径（绿）
+- **EM 局部规划避障**：基于 Frenet 框架 + EM 思想（E 步采样 → M 步选择），用五阶多项式生成光滑横向过渡路径，综合障碍物/横向偏移/平滑代价选优，可与 Lattice 算法实时切换
 - **多种速度控制算法**：支持 PID / Bang-Bang / Ramp 三种算法，可通过话题 `/sdc/control_algo` 实时切换
+- **多种横向（转向）控制算法**：支持 Stanley / LQR / MPC 三种算法，可通过话题 `/sdc/lateral_algo` 实时切换（LQR 基于线性化车辆模型 + 离散黎卡提方程，MPC 基于滚动时域投影梯度优化）
 - **阿克曼运动学模型**：小车基于**单车（bicycle）模型**真实转弯行驶（非完整约束），满足 `yaw' = v/L·tan(δ)`；配合 Stanley 转向控制平滑跟踪期望路径
 - **自动驾驶仿真节点** (`ring_road_sim`)：单张环形地图，支持 **自动 / 手动** 两种驾驶模式：
   - **自动**：Lattice 避障 + Stanley 循迹，沿环形道路自主行驶
@@ -29,7 +31,7 @@
   - 行驶轨迹（青色历史轨迹，可清除）
   - 状态 3D 文本（模式 / 速度 / 行为，悬于车顶）
   - 障碍物（`/simulation/obstacles`）与局部规划候选路径（`/simulation/lattice`）
-  - HUD 控制话题：`/sdc/speed`、`/sdc/action_id`、`/sdc/front_distance`、`/sdc/mode`、`/sdc/set_mode`、`/sdc/manual_cmd`、`/sdc/start`、`/sdc/pause`、`/sdc/clear_trail`、`/sdc/control_algo`
+  - HUD 控制话题：`/sdc/speed`、`/sdc/action_id`、`/sdc/front_distance`、`/sdc/mode`、`/sdc/set_mode`、`/sdc/manual_cmd`、`/sdc/start`、`/sdc/pause`、`/sdc/clear_trail`、`/sdc/control_algo`、`/sdc/planning_algo`、`/sdc/lateral_algo`
 - **RViz 自定义 HUD 面板插件** (`sdc/HudPanel`)：
   - 实时显示速度 / 行为 / 前方距离 / 驾驶模式
   - **自动 / 手动驾驶模式切换**
@@ -52,8 +54,11 @@
 │   ├── control/pid_controller.hpp      # PID 控制器
 │   ├── control/velocity_controller.hpp # 多种速度控制算法（PID/Bang-Bang/Ramp）
 │   ├── control/steering_controller.hpp # Stanley 转向控制器
+│   ├── control/lqr_controller.hpp      # LQR 横向控制器（线性化车辆模型 + DARE）
+│   ├── control/mpc_controller.hpp      # MPC 横向控制器（滚动时域优化）
 │   ├── model/ackermann_model.hpp       # 阿克曼（单车）运动学模型
 │   ├── planning/lattice_planner.hpp    # Lattice 局部规划避障
+│   ├── planning/em_planner.hpp         # EM 局部规划避障（Frenet + EM 采样）
 │   └── sim/obstacle_manager.hpp        # 随机障碍物管理器
 ├── src/
 │   ├── main.cpp                # 旧版单机 demo（不依赖 ROS2）
@@ -64,8 +69,11 @@
 │   ├── control/pid_controller.cpp
 │   ├── control/velocity_controller.cpp
 │   ├── control/steering_controller.cpp # Stanley 转向控制实现
+│   ├── control/lqr_controller.cpp      # LQR 转向控制实现
+│   ├── control/mpc_controller.cpp      # MPC 转向控制实现
 │   ├── model/ackermann_model.cpp       # 阿克曼运动学模型实现
 │   ├── planning/lattice_planner.cpp
+│   ├── planning/em_planner.cpp         # EM 局部规划实现
 │   ├── sim/obstacle_manager.cpp
 │   └── ros2/
 │       ├── ring_road_sim_node.cpp    # 环形道路仿真 + 可视化 + LIDAR/HUD/避障
@@ -163,6 +171,23 @@ ros2 topic pub --once /sdc/control_algo std_msgs/msg/Int32 "{data: 1}"   # 切�
 ros2 topic pub --once /sdc/control_algo std_msgs/msg/Int32 "{data: 0}"   # 切回 PID
 ```
 
+## 切换局部规划 / 横向控制算法
+
+仿真默认使用 **Lattice 局部规划 + Stanley 横向控制**。运行时可通过话题实时切换，便于对比学习各算法表现：
+
+```bash
+# 局部规划算法（0=Lattice 1=EM）
+ros2 topic pub --once /sdc/planning_algo std_msgs/msg/Int32 "{data: 1}"   # 切到 EM Planner
+ros2 topic pub --once /sdc/planning_algo std_msgs/msg/Int32 "{data: 0}"   # 切回 Lattice
+
+# 横向控制算法（0=Stanley 1=LQR 2=MPC）
+ros2 topic pub --once /sdc/lateral_algo std_msgs/msg/Int32 "{data: 1}"   # 切到 LQR
+ros2 topic pub --once /sdc/lateral_algo std_msgs/msg/Int32 "{data: 2}"   # 切到 MPC
+ros2 topic pub --once /sdc/lateral_algo std_msgs/msg/Int32 "{data: 0}"   # 切回 Stanley
+```
+
+当前生效的规划/控制算法会显示在车顶 3D 状态文本中（如 `自动 Lattice/Stanley`）。各算法实现位于 `include/planning/` 与 `include/control/`，参数（视距、采样数、Q/R 权重等）可直接在对应头文件中调整，方便学习参数对控制效果的影响。
+
 ## 独立运行旧版单机 demo（不依赖 ROS2）
 
 ```bash
@@ -184,6 +209,8 @@ cmake .. && make
 
 - [x] 加入 PID 速度控制（含 Bang-Bang / Ramp 多种算法，可实时切换）
 - [x] 加入局部路径规划避障（Lattice Planner，RViz 可视化候选与最优路径）
+- [x] 加入 EM Planner（Frenet + EM 采样，可与 Lattice 实时切换）
+- [x] 加入横向控制算法（Stanley / LQR / MPC，可实时切换）
 - [x] 随机动态障碍物系统（RViz 实时显示）
 - [x] 环形道路增加复杂性（S 形绕桩 / 窄门 / 路障 / 多车道标线）
 - [x] 自动 / 手动（WASD）双驾驶模式
