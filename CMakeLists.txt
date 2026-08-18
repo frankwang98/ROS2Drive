@@ -17,6 +17,17 @@ find_package(tf2_ros REQUIRED)
 # 基础环境缺少 rviz_common / Qt5 时自动跳过，不影响核心仿真构建
 find_package(rviz_common QUIET)
 find_package(Qt5 QUIET COMPONENTS Widgets)
+
+# 行为树（可选）：基于 BehaviorTree.CPP v3 实现基础行为切换。
+# 若环境已安装 behaviors_cpp_v3 则启用完整行为树实现，否则自动退化为规则决策。
+find_package(behaviortree_cpp_v3 QUIET)
+if(behaviortree_cpp_v3_FOUND)
+  set(SDC_BUILD_BEHAVIOR_TREE ON)
+  message(STATUS "BehaviorTree.CPP v3: ENABLED (行为树实现)")
+else()
+  set(SDC_BUILD_BEHAVIOR_TREE OFF)
+  message(STATUS "BehaviorTree.CPP v3: DISABLED (退化为规则决策)")
+endif()
 if(rviz_common_FOUND AND Qt5Widgets_FOUND)
   set(SDC_BUILD_RVIZ_PANEL ON)
   message(STATUS "RViz HUD panel plugin: ENABLED")
@@ -46,6 +57,7 @@ add_library(sdc_core STATIC
   src/planning/lattice_planner.cpp
   src/planning/em_planner.cpp
   src/sim/obstacle_manager.cpp
+  src/behavior_tree/behavior_tree_planner.cpp
   src/sim/map.cpp
   src/sim/driver.cpp
   src/car/car.cpp
@@ -59,6 +71,12 @@ ament_target_dependencies(sdc_core
   visualization_msgs
   geometry_msgs
 )
+
+# 行为树（可选）
+if(SDC_BUILD_BEHAVIOR_TREE)
+  target_compile_definitions(sdc_core PUBLIC BEHAVIORTREE_CPP_V3_FOUND)
+  ament_target_dependencies(sdc_core behaviortree_cpp_v3)
+endif()
 
 # ---- 旧版单机 demo（保留，方便对比）----
 add_executable(demo_car

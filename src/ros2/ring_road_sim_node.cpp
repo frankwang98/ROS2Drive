@@ -25,6 +25,7 @@
  *     /sdc/control_algo   (Int32)  切换速度控制算法（自动）
  *     /sdc/planning_algo  (Int32)  切换局部规划算法（0=Lattice 1=EM）
  *     /sdc/lateral_algo   (Int32)  切换横向控制算法（0=Stanley 1=LQR 2=MPC）
+ *     /sdc/behavior_tree  (Int32)  切换基础行为决策（0=规则决策 1=行为树）
  *   发布：
  *     /sdc/speed          (Float64) 当前车速
  *     /sdc/action_id      (Float64) 行为ID
@@ -162,6 +163,14 @@ public:
           driver_.set_lateral_algorithm(algo);
           RCLCPP_INFO(get_logger(), "横向控制算法切换为: %s",
                       AutoDriver::lateral_algorithm_name(algo));
+        });
+    // 行为树基础行为切换（0=规则决策 1=行为树）
+    bt_sub_ = create_subscription<std_msgs::msg::Int32>(
+        "sdc/behavior_tree", 10, [this](const std_msgs::msg::Int32::SharedPtr msg) {
+          bool on = (msg->data != 0);
+          driver_.set_use_behavior_tree(on);
+          RCLCPP_INFO(get_logger(), "基础行为切换: %s",
+                      on ? "行为树 (BehaviorTree.CPP v3)" : "规则决策");
         });
     // 驾驶模式切换（0=自动 1=手动）
     set_mode_sub_ = create_subscription<std_msgs::msg::Int32>(
@@ -465,11 +474,13 @@ private:
       m.color.r = 1; m.color.g = 1; m.color.b = 1; m.color.a = 1;
       char buf[200];
       const char* mode_str = (mode_ == Mode::kManual) ? "手动(WASD)" : "自动";
+      const char* bt_str = driver_.use_behavior_tree() ? "行为树" : "规则";
       std::snprintf(buf, sizeof(buf),
-                    "模式:%s  v=%.1f m/s  %s  %s/%s",
+                    "模式:%s  v=%.1f m/s  %s  %s/%s  [%s]",
                     mode_str, driver_.speed(), action_name(last_action_),
                     AutoDriver::planning_algorithm_name(driver_.planning_algorithm()),
-                    AutoDriver::lateral_algorithm_name(driver_.lateral_algorithm()));
+                    AutoDriver::lateral_algorithm_name(driver_.lateral_algorithm()),
+                    bt_str);
       m.text = buf;
       ma.markers.push_back(m);
     }
@@ -537,6 +548,7 @@ private:
   rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr algo_sub_;
   rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr planning_sub_;
   rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr lateral_sub_;
+  rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr bt_sub_;
   rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr set_mode_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr manual_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr reset_sub_;

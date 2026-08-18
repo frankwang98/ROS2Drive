@@ -17,6 +17,9 @@
   <depend>tf2</depend>
   <depend>tf2_ros</depend>
 
+  <!-- 行为树（可选，基于 BehaviorTree.CPP v3 实现基础行为切换） -->
+  <depend condition="$SDC_BUILD_BEHAVIOR_TREE">behaviortree_cpp_v3</depend>
+
   <exec_depend>rviz2</exec_depend>
   <exec_depend>rviz_common</exec_depend>
   <exec_depend>pluginlib</exec_depend>

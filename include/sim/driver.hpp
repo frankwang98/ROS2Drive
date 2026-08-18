@@ -3,6 +3,7 @@
 
 #include <vector>
 
+#include "behavior_tree/behavior_tree_planner.hpp"
 #include "control/lqr_controller.hpp"
 #include "control/mpc_controller.hpp"
 #include "control/steering_controller.hpp"
@@ -72,6 +73,14 @@ class AutoDriver {
   void set_lateral_algorithm(LateralAlgorithm a) { lateral_algo_ = a; }
   LateralAlgorithm lateral_algorithm() const { return lateral_algo_; }
 
+  // ========== 行为树（BehaviorTree.CPP v3）基础行为切换 ==========
+  /// 是否启用行为树进行基础行为决策（加速/巡航/减速/停车）。
+  /// 启用前会自动初始化行为树；未安装行为树库时退化为规则决策。
+  void set_use_behavior_tree(bool on);
+  bool use_behavior_tree() const { return use_behavior_tree_; }
+  /// 最近一次行为树给出的行为（供可视化 / 日志）。
+  Action behavior_tree_action() const { return behavior_tree_.last_action(); }
+
   // 直接访问小车状态（用于可视化 / TF）
   CarState& car() { return car_; }
   const CarState& car() const { return car_; }
@@ -112,9 +121,11 @@ class AutoDriver {
   MpcController mpc_controller_;
   LatticePlanner lattice_planner_;
   EmPlanner em_planner_;
+  BehaviorTreePlanner behavior_tree_;
 
   PlanningAlgorithm planning_algo_{PlanningAlgorithm::kLattice};
   LateralAlgorithm lateral_algo_{LateralAlgorithm::kStanley};
+  bool use_behavior_tree_{false};
 
   double speed_{0.0};
   bool   reversing_{false};
