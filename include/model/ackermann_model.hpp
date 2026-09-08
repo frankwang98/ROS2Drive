@@ -44,6 +44,7 @@ class AckermannModel {
   double yaw() const   { return yaw_; }
   double speed() const { return speed_; }
   double steer() const { return steer_; }
+  double wheelbase() const { return p_.wheelbase; }
 
  private:
   double clamp(double v, double lo, double hi) const { return std::fmin(hi, std::fmax(lo, v)); }

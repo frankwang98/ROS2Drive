@@ -51,6 +51,7 @@
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <nav_msgs/msg/odometry.hpp>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/float64.hpp>
@@ -111,6 +112,7 @@ public:
     distance_pub_ = create_publisher<std_msgs::msg::Float64>("sdc/front_distance", live_qos);
     obstacle_pub2_ = create_publisher<std_msgs::msg::Float64>("sdc/obstacle_count", live_qos);
     mode_pub_     = create_publisher<std_msgs::msg::Int32>("sdc/mode", live_qos);
+    odometry_pub_ = create_publisher<nav_msgs::msg::Odometry>("sdc/odometry", live_qos);
 
     // 开始行驶（自动）
     start_sub_ = create_subscription<std_msgs::msg::Bool>(
@@ -322,6 +324,20 @@ private:
     std_msgs::msg::Int32 mode;
     mode.data = (mode_ == Mode::kManual) ? 1 : 0;
     mode_pub_->publish(mode);
+
+    nav_msgs::msg::Odometry odom;
+    odom.header.stamp = now();
+    odom.header.frame_id = "world";
+    odom.child_frame_id = "car_base_link";
+    odom.pose.pose.position.x = driver_.car().x();
+    odom.pose.pose.position.y = driver_.car().y();
+    const double yaw = driver_.car().yaw();
+    odom.pose.pose.orientation.z = std::sin(yaw / 2.0);
+    odom.pose.pose.orientation.w = std::cos(yaw / 2.0);
+    odom.twist.twist.linear.x = driver_.speed();
+    odom.twist.twist.angular.z = driver_.speed() * std::tan(driver_.car().steer()) /
+                                driver_.car().wheelbase();
+    odometry_pub_->publish(odom);
   }
 
   // ========== 障碍物标记（动态随机障碍 + 静态复杂路况） ==========
@@ -541,6 +557,7 @@ private:
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr distance_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr obstacle_pub2_;
   rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr mode_pub_;
+  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odometry_pub_;
 
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr start_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr pause_sub_;
