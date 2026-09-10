@@ -1,6 +1,8 @@
 #include "behavior_tree/behavior_tree_planner.hpp"
 
 #include <string>
+#include <memory>
+#include <exception>
 #include <vector>
 
 #include "decision/decision_maker.hpp"
@@ -27,24 +29,45 @@ namespace sdc {
 // ============================================================
 // 行为树 XML 描述
 // ============================================================
-// 结构：Fallback（任一子节点成功即成功，从上到下依次尝试）
-//   - EmergencyStop 条件成立 -> 停车（成功）
-//   - SlowDown 条件成立      -> 减速（成功）
-//   - Cruise 条件成立        -> 匀速巡航（成功）
-//   - Accelerate 兜底        -> 加速（成功）
+// 结构：所有场景共用 DistancePolicy 子树，仅以 stop_t/slow_t/cruise_t
+// 三个黑板参数区分阈值；行为决策完全由 XML 决定，节点层不做硬编码兜底。
 //
-// 条件节点与行为节点通过黑板（blackboard）共享 `front_dist` 与 `action`。
+// DistancePolicy（参数化策略子树）
+//   └─ Fallback（任一子节点成功即返回，从上到下依次尝试）
+//     ├─ EmergencyStop(front_dist, threshold=stop_t)   紧急停车
+//     ├─ SlowDown     (front_dist, threshold=slow_t)   减速
+//     ├─ Cruise       (front_dist, threshold=cruise_t) 匀速巡航
+//     └─ Accelerate                                  加速（兜底）
+//
+// 场景 BehaviorTree 仅做一次 SubTree 绑定，把每个场景的阈值写入黑板。
+// 真正运行的入口是 RingDemo/PortTransport/MiningHaul/AgricultureRoute 之一。
 // ============================================================
 const char* BehaviorTreePlanner::xml() {
   return R"(
-<root BTCPP_format="4">
-  <BehaviorTree ID="BasicBehaviorSwitch">
+<root>
+  <BehaviorTree ID="DistancePolicy">
     <Fallback>
-      <EmergencyStop front_dist="{front_dist}"/>
-      <SlowDown     front_dist="{front_dist}"/>
-      <Cruise       front_dist="{front_dist}"/>
-      <Accelerate/>
+      <EmergencyStop front_dist="{front_dist}" threshold="{stop_t}" action="{action}"/>
+      <SlowDown      front_dist="{front_dist}" threshold="{slow_t}" action="{action}"/>
+      <Cruise        front_dist="{front_dist}" threshold="{cruise_t}" action="{action}"/>
+      <Accelerate action="{action}"/>
     </Fallback>
+  </BehaviorTree>
+
+  <BehaviorTree ID="RingDemo">
+    <SubTree ID="DistancePolicy" front_dist="{front_dist}" action="{action}" stop_t="1.5" slow_t="4.0" cruise_t="8.0"/>
+  </BehaviorTree>
+
+  <BehaviorTree ID="PortTransport">
+    <SubTree ID="DistancePolicy" front_dist="{front_dist}" action="{action}" stop_t="1.2" slow_t="3.5" cruise_t="10.0"/>
+  </BehaviorTree>
+
+  <BehaviorTree ID="MiningHaul">
+    <SubTree ID="DistancePolicy" front_dist="{front_dist}" action="{action}" stop_t="2.5" slow_t="7.0" cruise_t="14.0"/>
+  </BehaviorTree>
+
+  <BehaviorTree ID="AgricultureRoute">
+    <SubTree ID="DistancePolicy" front_dist="{front_dist}" action="{action}" stop_t="2.0" slow_t="5.0" cruise_t="12.0"/>
   </BehaviorTree>
 </root>
 )";
@@ -55,6 +78,10 @@ namespace {
 #ifdef BEHAVIORTREE_CPP_V3_FOUND
 
 // ---------- 条件节点：按距离判定，命中后设置对应行为 ----------
+//
+// 阈值由 XML/SubTree 参数显式注入（threshold 端口）。节点层不持有任何
+// 硬编码默认值：缺少参数会被视为配置错误直接失败，避免静默回退到
+// "看起来在跑但其实是错的"状态。
 class DistanceCondition : public BT::ConditionNode {
  public:
   DistanceCondition(const std::string& name,
@@ -63,12 +90,12 @@ class DistanceCondition : public BT::ConditionNode {
 
   static BT::PortsList providedPorts() {
     return {BT::InputPort<double>("front_dist"),
+            BT::InputPort<double>("threshold"),
             BT::OutputPort<int>("action")};
   }
 
  protected:
-  // 子类实现具体阈值
-  virtual double threshold() const = 0;
+  // 子类只需声明命中后输出的动作。
   virtual int action_value() const = 0;
 
   BT::NodeStatus tick() override {
@@ -76,7 +103,13 @@ class DistanceCondition : public BT::ConditionNode {
     if (!getInput("front_dist", front_dist)) {
       return BT::NodeStatus::FAILURE;
     }
-    if (front_dist < threshold()) {
+    double configured_threshold = 0.0;
+    if (!getInput("threshold", configured_threshold)) {
+      throw BT::RuntimeError(
+          name() + ": missing 'threshold' input port; "
+          "threshold must be provided by the BehaviorTree XML / SubTree args.");
+    }
+    if (front_dist < configured_threshold) {
       setOutput("action", action_value());
       return BT::NodeStatus::SUCCESS;
     }
@@ -87,21 +120,18 @@ class DistanceCondition : public BT::ConditionNode {
 class EmergencyStop : public DistanceCondition {
  public:
   using DistanceCondition::DistanceCondition;
-  double threshold() const override { return 1.5; }
   int action_value() const override { return static_cast<int>(Action::kStop); }
 };
 
 class SlowDown : public DistanceCondition {
  public:
   using DistanceCondition::DistanceCondition;
-  double threshold() const override { return 4.0; }
   int action_value() const override { return static_cast<int>(Action::kBrake); }
 };
 
 class Cruise : public DistanceCondition {
  public:
   using DistanceCondition::DistanceCondition;
-  double threshold() const override { return 8.0; }
   int action_value() const override { return static_cast<int>(Action::kCruise); }
 };
 
@@ -143,11 +173,12 @@ BehaviorTreePlanner::~BehaviorTreePlanner() {
 #endif
 }
 
-bool BehaviorTreePlanner::init() {
+bool BehaviorTreePlanner::init(const std::string& xml_path,
+                               const std::string& tree_id) {
 #ifdef BEHAVIORTREE_CPP_V3_FOUND
   if (initialized_) return true;
 
-  auto* factory = new BT::BehaviorTreeFactory;
+  auto factory = std::make_unique<BT::BehaviorTreeFactory>();
 
   factory->registerNodeType<EmergencyStop>("EmergencyStop");
   factory->registerNodeType<SlowDown>("SlowDown");
@@ -159,15 +190,29 @@ bool BehaviorTreePlanner::init() {
   blackboard->set<double>("front_dist", 10.0);
   blackboard->set<int>("action", static_cast<int>(Action::kAccelerate));
 
-  BT::Tree tree = factory->createTreeFromText(xml(), blackboard);
-  // BT::Tree 持有 factory 引用，因此 factory 必须存活到 tree 之后。
-  factory_ = factory;
-  tree_ = new BT::Tree(std::move(tree));
-  initialized_ = true;
-  return true;
+  try {
+    if (tree_id.empty()) throw std::invalid_argument("BehaviorTree ID must not be empty");
+    if (xml_path.empty())
+      factory->registerBehaviorTreeFromText(xml());
+    else
+      factory->registerBehaviorTreeFromFile(xml_path);
+    BT::Tree tree = factory->createTree(tree_id, blackboard);
+    tree_ = new BT::Tree(std::move(tree));
+    factory_ = factory.release();
+    initialized_ = true;
+    last_error_.clear();
+    return true;
+  } catch (const std::exception& error) {
+    last_error_ = error.what();
+    initialized_ = false;
+    return false;
+  }
 #else
+  (void)xml_path;
+  (void)tree_id;
   // 无行为树库：退化为规则决策，仍保证 init 返回 true（功能可用）。
   initialized_ = false;
+  last_error_ = "BehaviorTree.CPP v3 unavailable; using rule fallback";
   return true;
 #endif
 }

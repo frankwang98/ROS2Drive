@@ -1,0 +1,47 @@
+<root>
+
+  <!-- ============================================================
+       DistancePolicy：按前向障碍距离选择行为的参数化策略子树。
+       阈值由调用方（场景 BehaviorTree）通过 SubTree 参数注入：
+         stop_t    紧急停车触发距离（米）
+         slow_t    减速触发距离（米）
+         cruise_t  巡航触发距离（米）
+       节点层不提供默认值，缺参数会立即失败（fail fast）。
+       ============================================================ -->
+  <BehaviorTree ID="DistancePolicy">
+    <Fallback>
+      <EmergencyStop front_dist="{front_dist}" threshold="{stop_t}" action="{action}"/>
+      <SlowDown      front_dist="{front_dist}" threshold="{slow_t}" action="{action}"/>
+      <Cruise        front_dist="{front_dist}" threshold="{cruise_t}" action="{action}"/>
+      <Accelerate action="{action}"/>
+    </Fallback>
+  </BehaviorTree>
+
+  <!-- ============================================================
+       场景 BehaviorTree：仅做参数绑定，不重复策略逻辑。
+       ============================================================ -->
+
+  <!-- 环形道路教学演示：常规阈值。 -->
+  <BehaviorTree ID="RingDemo">
+    <SubTree ID="DistancePolicy" front_dist="{front_dist}" action="{action}"
+             stop_t="1.5" slow_t="4.0" cruise_t="8.0"/>
+  </BehaviorTree>
+
+  <!-- 港区低速紧凑：近距离停车、全程保守巡航。 -->
+  <BehaviorTree ID="PortTransport">
+    <SubTree ID="DistancePolicy" front_dist="{front_dist}" action="{action}"
+             stop_t="1.2" slow_t="3.5" cruise_t="10.0"/>
+  </BehaviorTree>
+
+  <!-- 矿区重载矿卡：制动距离长，采用更保守的停车/降速阈值。 -->
+  <BehaviorTree ID="MiningHaul">
+    <SubTree ID="DistancePolicy" front_dist="{front_dist}" action="{action}"
+             stop_t="2.5" slow_t="7.0" cruise_t="14.0"/>
+  </BehaviorTree>
+
+  <!-- 农机作业：对作物/人员保持较大缓冲，但车速本身较低。 -->
+  <BehaviorTree ID="AgricultureRoute">
+    <SubTree ID="DistancePolicy" front_dist="{front_dist}" action="{action}"
+             stop_t="2.0" slow_t="5.0" cruise_t="12.0"/>
+  </BehaviorTree>
+</root>

@@ -1,0 +1,35 @@
+/**:
+  ros__parameters:
+    robot_id: car01
+    world_frame: world
+    base_frame: car_base_link
+    update_rate_hz: 20.0
+    lidar_rate_hz: 10.0
+    initial_mode: 0
+    bt_xml: ""
+    bt_tree_id: RingDemo
+    planner:
+      spacing: 0.25
+      horizon: 30.0
+      obstacle_margin: 0.8
+    controller:
+      wheelbase: 2.0
+      minimum_lookahead: 1.5
+      lookahead_time: 1.0
+      maximum_steering: 0.55
+    velocity:
+      maximum_lateral_acceleration: 1.2
+      maximum_acceleration: 1.0
+      maximum_deceleration: 1.5
+      minimum_curve_speed: 0.3
+    safety:
+      state_timeout: 0.5
+      recovery_healthy_cycles: 3
+      policies:
+        localization_lost: stop
+        planning_failed: stop
+        control_error: stop
+        vehicle_error: estop
+        input_timeout: stop
+        perception_timeout: stop
+        emergency_stop: estop

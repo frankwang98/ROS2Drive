@@ -1,0 +1,24 @@
+uint8 NAVIGATE_TO=0
+uint8 FOLLOW_ROUTE=1
+uint8 STOP=2
+uint8 PARK=3
+uint8 DOCK=4
+uint8 RETURN_HOME=5
+
+std_msgs/Header header
+uint64 sequence
+string mission_id
+uint8 mission_type
+geometry_msgs/Pose2D[] route
+float64 speed_limit
+float64 goal_tolerance
+float64 timeout_s
+bool allow_preempt
+---
+bool success
+string final_state
+string reason
+---
+string state
+float64 progress
+string reason

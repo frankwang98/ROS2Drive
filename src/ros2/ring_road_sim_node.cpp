@@ -3,13 +3,13 @@
  *
  * 单张「环形道路」地图，在基础环形基础上增加了道路复杂性（S 形绕桩、
  * 窄门、减速带、多车道标线等），并支持 **自动 / 手动** 两种驾驶模式：
- *   - 自动驾驶：感知 → Lattice 避障 → 决策 → 速度 → Stanley → 阿克曼
+ *   - 自动驾驶：Mission → Planner → Velocity → Controller → Safety → Vehicle
  *   - 手动驾驶：通过 WASD 键盘直接控制（W/S 油门/倒车，A/D 转向）
  *
  * 功能：
  *   1. RViz2 Marker 绘制环形道路（含复杂路况）
- *   2. Lattice 局部规划避障并可视化候选/最优路径
- *   3. PID / Bang-Bang / Ramp 速度控制算法（自动模式，话题可切换）
+ *   2. 统一稠密轨迹与局部避障结果可视化
+ *   3. VehicleRuntime 规划、速度、控制与安全闭环
  *   4. 自动/手动驾驶模式切换（HUD 面板或话题）
  *   5. 随机动态障碍物 + 静态复杂路况避障
  *   6. TF / LIDAR / 状态文本等可视化
@@ -22,10 +22,6 @@
  *     /sdc/pause          (Bool)   暂停/继续行驶
  *     /sdc/reset_car      (Bool)   把车放回环形起点
  *     /sdc/clear_trail    (Bool)   清除轨迹
- *     /sdc/control_algo   (Int32)  切换速度控制算法（自动）
- *     /sdc/planning_algo  (Int32)  切换局部规划算法（0=Lattice 1=EM）
- *     /sdc/lateral_algo   (Int32)  切换横向控制算法（0=Stanley 1=LQR 2=MPC）
- *     /sdc/behavior_tree  (Int32)  切换基础行为决策（0=规则决策 1=行为树）
  *   发布：
  *     /sdc/speed          (Float64) 当前车速
  *     /sdc/action_id      (Float64) 行为ID
@@ -39,12 +35,15 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdint>
 #include <deque>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp_action/rclcpp_action.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <geometry_msgs/msg/point.hpp>
@@ -56,20 +55,26 @@
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/float64.hpp>
 #include <std_msgs/msg/int32.hpp>
+#include <std_srvs/srv/trigger.hpp>
 #include <tf2_ros/transform_broadcaster.h>
+#include "self_driving_car_demo/msg/control_command.hpp"
+#include "self_driving_car_demo/msg/fault_array.hpp"
+#include "self_driving_car_demo/msg/runtime_status.hpp"
+#include "self_driving_car_demo/msg/runtime_metrics.hpp"
+#include "self_driving_car_demo/msg/trajectory.hpp"
+#include "self_driving_car_demo/action/execute_mission.hpp"
 
-#include "control/velocity_controller.hpp"
-#include "planning/em_planner.hpp"
-#include "planning/lattice_planner.hpp"
-#include "sim/driver.hpp"
 #include "sim/map.hpp"
 #include "sim/obstacle_manager.hpp"
+#include "planning/reference_path_planner.hpp"
+#include "simulation/simulation_engine.hpp"
+#include "behavior_tree/behavior_tree_behavior.hpp"
+#include "ros/runtime_message_converter.hpp"
 
 using namespace std::chrono_literals;
 using namespace sdc;
 
 // ========== 仿真参数 ==========
-constexpr double SIM_DT          = 0.05;   // 仿真步长（秒）
 constexpr double LIDAR_RANGE     = 35.0;   // LIDAR 探测距离（米）
 constexpr int    LIDAR_BEAMS     = 360;    // 水平扫描线数
 constexpr int    PATH_SAMPLES    = 60;     // 规划路径采样点
@@ -84,17 +89,127 @@ static geometry_msgs::msg::Point make_point(double x, double y, double z = 0.0) 
   return p;
 }
 
+static std::string runtime_state_name(domain::RuntimeState state) {
+  switch (state) {
+    case domain::RuntimeState::kInit: return "INIT";
+    case domain::RuntimeState::kReady: return "READY";
+    case domain::RuntimeState::kRunning: return "RUNNING";
+    case domain::RuntimeState::kPaused: return "PAUSED";
+    case domain::RuntimeState::kDegraded: return "DEGRADED";
+    case domain::RuntimeState::kStopped: return "STOPPED";
+    case domain::RuntimeState::kFault: return "FAULT";
+    case domain::RuntimeState::kEstop: return "ESTOP";
+  }
+  return "UNKNOWN";
+}
+
+static std::string mission_state_name(domain::MissionState state) {
+  switch (state) {
+    case domain::MissionState::kPending: return "PENDING";
+    case domain::MissionState::kActive: return "ACTIVE";
+    case domain::MissionState::kPaused: return "PAUSED";
+    case domain::MissionState::kSucceeded: return "SUCCEEDED";
+    case domain::MissionState::kFailed: return "FAILED";
+    case domain::MissionState::kCanceled: return "CANCELED";
+  }
+  return "UNKNOWN";
+}
+
+static domain::FaultAction fault_action_from_string(const std::string& value) {
+  if (value == "report") return domain::FaultAction::kReportOnly;
+  if (value == "degrade") return domain::FaultAction::kDegrade;
+  if (value == "stop") return domain::FaultAction::kStop;
+  if (value == "estop") return domain::FaultAction::kEmergencyStop;
+  throw std::invalid_argument("unknown safety policy action: " + value);
+}
+
+
 class RingRoadSimNode : public rclcpp::Node {
 public:
+  using ExecuteMission = self_driving_car_demo::action::ExecuteMission;
+  using MissionGoalHandle = rclcpp_action::ServerGoalHandle<ExecuteMission>;
   RingRoadSimNode()
       : Node("ring_road_sim")
       , map_(create_map(MapType::kRing))
-      , driver_()
+      , simulation_(std::make_unique<planning::ReferencePathPlanner>())
       , sim_time_(0.0)
       , obstacle_manager_(26.0, 9.0, 20240812)
   {
-    auto road_qos = rclcpp::QoS(10).transient_local();
+    robot_id_ = declare_parameter<std::string>("robot_id", "car01");
+    world_frame_ = declare_parameter<std::string>("world_frame", "world");
+    base_frame_ = declare_parameter<std::string>("base_frame", "car_base_link");
+    const double update_rate_hz = declare_parameter<double>("update_rate_hz", 20.0);
+    const double lidar_rate_hz = declare_parameter<double>("lidar_rate_hz", 10.0);
+    const std::string bt_xml = declare_parameter<std::string>("bt_xml", "");
+    const std::string bt_tree_id =
+        declare_parameter<std::string>("bt_tree_id", "RingDemo");
+    planning::ReferencePathPlanner::Config planner_config;
+    planner_config.spacing = declare_parameter<double>("planner.spacing", 0.25);
+    planner_config.horizon = declare_parameter<double>("planner.horizon", 30.0);
+    planner_config.obstacle_margin = declare_parameter<double>("planner.obstacle_margin", 0.8);
+    control::PurePursuitController::Config controller_config;
+    controller_config.wheelbase = declare_parameter<double>("controller.wheelbase", 2.0);
+    controller_config.minimum_lookahead = declare_parameter<double>("controller.minimum_lookahead", 1.5);
+    controller_config.lookahead_time = declare_parameter<double>("controller.lookahead_time", 1.0);
+    controller_config.maximum_steering = declare_parameter<double>("controller.maximum_steering", 0.55);
+    planning::VelocityPlanner::Config velocity_config;
+    velocity_config.maximum_lateral_acceleration = declare_parameter<double>("velocity.maximum_lateral_acceleration", 1.2);
+    velocity_config.maximum_acceleration = declare_parameter<double>("velocity.maximum_acceleration", 1.0);
+    velocity_config.maximum_deceleration = declare_parameter<double>("velocity.maximum_deceleration", 1.5);
+    velocity_config.minimum_curve_speed = declare_parameter<double>("velocity.minimum_curve_speed", 0.3);
+    safety::SafetyConfig safety_config;
+    safety_config.state_timeout_s = declare_parameter<double>("safety.state_timeout", 0.5);
+    const int recovery_healthy_cycles =
+        declare_parameter<int>("safety.recovery_healthy_cycles", 3);
+    safety_config.recovery_healthy_cycles =
+        static_cast<unsigned>(recovery_healthy_cycles);
+    safety_config.policies[domain::FaultCode::kLocalizationLost] = fault_action_from_string(
+        declare_parameter<std::string>("safety.policies.localization_lost", "stop"));
+    safety_config.policies[domain::FaultCode::kPlanningFailed] = fault_action_from_string(
+        declare_parameter<std::string>("safety.policies.planning_failed", "stop"));
+    safety_config.policies[domain::FaultCode::kControlError] = fault_action_from_string(
+        declare_parameter<std::string>("safety.policies.control_error", "stop"));
+    safety_config.policies[domain::FaultCode::kVehicleError] = fault_action_from_string(
+        declare_parameter<std::string>("safety.policies.vehicle_error", "estop"));
+    safety_config.policies[domain::FaultCode::kInputTimeout] = fault_action_from_string(
+        declare_parameter<std::string>("safety.policies.input_timeout", "stop"));
+    safety_config.policies[domain::FaultCode::kPerceptionTimeout] = fault_action_from_string(
+        declare_parameter<std::string>("safety.policies.perception_timeout", "stop"));
+    safety_config.policies[domain::FaultCode::kEmergencyStop] = fault_action_from_string(
+        declare_parameter<std::string>("safety.policies.emergency_stop", "estop"));
+    if (robot_id_.empty() || world_frame_.empty() || base_frame_.empty() ||
+        bt_tree_id.empty())
+      throw std::invalid_argument("robot_id, frames and bt_tree_id must not be empty");
+    if (update_rate_hz < 1.0 || update_rate_hz > 100.0 ||
+        lidar_rate_hz < 1.0 || lidar_rate_hz > 50.0)
+      throw std::invalid_argument("update_rate_hz or lidar_rate_hz outside supported range");
+    if (planner_config.spacing <= 0.0 || planner_config.horizon <= 0.0 ||
+        planner_config.obstacle_margin < 0.0 || controller_config.wheelbase <= 0.0 ||
+        controller_config.minimum_lookahead <= 0.0 || controller_config.maximum_steering <= 0.0 ||
+        velocity_config.maximum_acceleration <= 0.0 || velocity_config.maximum_deceleration <= 0.0 ||
+        safety_config.state_timeout_s <= 0.0 || recovery_healthy_cycles <= 0)
+      throw std::invalid_argument("planner/controller/velocity/safety parameters must be positive");
+    sim_dt_ = 1.0 / update_rate_hz;
+    configured_loop_hz_ = update_rate_hz;
+    if (!bt_xml.empty()) {
+      auto behavior =
+          std::make_unique<BehaviorTreeBehavior>(bt_xml, bt_tree_id);
+      if (!behavior->configurationAccepted())
+        throw std::invalid_argument("BehaviorTree configuration rejected: " +
+                                    behavior->lastError());
+      if (!behavior->initialized() && !behavior->lastError().empty())
+        RCLCPP_WARN(get_logger(), "BehaviorTree fallback: %s", behavior->lastError().c_str());
+      simulation_.setBehaviorManager(std::move(behavior));
+    }
+    simulation_.setPlanner(std::make_unique<planning::ReferencePathPlanner>(planner_config));
+    simulation_.setController(std::make_unique<control::PurePursuitController>(controller_config));
+    simulation_.setVelocityPlanner(planning::VelocityPlanner(velocity_config));
+    simulation_.setSafetyManager(safety::SafetyManager(safety_config));
+    auto road_qos = rclcpp::QoS(1).reliable().transient_local();
+    auto sensor_qos = rclcpp::SensorDataQoS().keep_last(5);
     auto live_qos = rclcpp::QoS(10).reliable();
+    auto status_qos = rclcpp::QoS(1).reliable().transient_local();
+    auto command_qos = rclcpp::QoS(10).reliable();
     road_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>(
         "simulation/markers", road_qos);
     live_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>(
@@ -104,7 +219,7 @@ public:
     plan_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>(
         "simulation/lattice", live_qos);
     lidar_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
-        "sensor/lidar", live_qos);
+        "sensor/lidar", sensor_qos);
 
     // HUD 面板状态话题
     speed_pub_    = create_publisher<std_msgs::msg::Float64>("sdc/speed", live_qos);
@@ -112,84 +227,87 @@ public:
     distance_pub_ = create_publisher<std_msgs::msg::Float64>("sdc/front_distance", live_qos);
     obstacle_pub2_ = create_publisher<std_msgs::msg::Float64>("sdc/obstacle_count", live_qos);
     mode_pub_     = create_publisher<std_msgs::msg::Int32>("sdc/mode", live_qos);
-    odometry_pub_ = create_publisher<nav_msgs::msg::Odometry>("sdc/odometry", live_qos);
+    odometry_pub_ = create_publisher<nav_msgs::msg::Odometry>("sdc/odometry", sensor_qos);
+    runtime_state_pub_ = create_publisher<std_msgs::msg::Int32>("sdc/runtime_state", live_qos);
+    fault_count_pub_ = create_publisher<std_msgs::msg::Int32>("sdc/fault_count", live_qos);
+    mission_state_pub_ = create_publisher<std_msgs::msg::Int32>("sdc/mission_state", live_qos);
+    mission_progress_pub_ = create_publisher<std_msgs::msg::Float64>("sdc/mission_progress", live_qos);
+    trajectory_pub_ = create_publisher<self_driving_car_demo::msg::Trajectory>("planning/trajectory", live_qos);
+    control_command_pub_ = create_publisher<self_driving_car_demo::msg::ControlCommand>("control/command", live_qos);
+    status_pub_ = create_publisher<self_driving_car_demo::msg::RuntimeStatus>("runtime/status", status_qos);
+    faults_pub_ = create_publisher<self_driving_car_demo::msg::FaultArray>("runtime/faults", status_qos);
+    metrics_pub_ = create_publisher<self_driving_car_demo::msg::RuntimeMetrics>("runtime/metrics", live_qos);
+    health_service_ = create_service<std_srvs::srv::Trigger>(
+        "runtime/health",
+        [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+               std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+          const auto state = simulation_.runtime().output().state;
+          response->success = state != domain::RuntimeState::kFault &&
+                              state != domain::RuntimeState::kEstop;
+          response->message = runtime_state_name(state);
+        });
+    recovery_service_ = create_service<std_srvs::srv::Trigger>(
+        "runtime/acknowledge_recovery",
+        [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+               std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+          response->success = simulation_.acknowledgeSafetyRecovery();
+          response->message = response->success
+                                  ? "safety recovery acknowledged"
+                                  : "recovery not ready: remove the fault and stop the vehicle";
+        });
+    mission_action_server_ = rclcpp_action::create_server<ExecuteMission>(
+        this, "mission/execute",
+        std::bind(&RingRoadSimNode::handle_mission_goal, this,
+                  std::placeholders::_1, std::placeholders::_2),
+        std::bind(&RingRoadSimNode::handle_mission_cancel, this,
+                  std::placeholders::_1),
+        std::bind(&RingRoadSimNode::handle_mission_accepted, this,
+                  std::placeholders::_1));
 
     // 开始行驶（自动）
     start_sub_ = create_subscription<std_msgs::msg::Bool>(
-        "sdc/start", 10, [this](const std_msgs::msg::Bool::SharedPtr msg) {
+        "sdc/start", command_qos, [this](const std_msgs::msg::Bool::SharedPtr msg) {
           if (msg->data) {
             paused_ = false;
             driving_ = true;
+            simulation_.resume();
             RCLCPP_INFO(get_logger(), "已开始行驶");
           }
         });
     // 暂停/继续
     pause_sub_ = create_subscription<std_msgs::msg::Bool>(
-        "sdc/pause", 10, [this](const std_msgs::msg::Bool::SharedPtr msg) {
+        "sdc/pause", command_qos, [this](const std_msgs::msg::Bool::SharedPtr msg) {
           paused_ = msg->data;
+          if (paused_) simulation_.pause(); else simulation_.resume();
           RCLCPP_INFO(get_logger(), paused_ ? "仿真已暂停" : "仿真已继续");
         });
     // 清除轨迹
     clear_sub_ = create_subscription<std_msgs::msg::Bool>(
-        "sdc/clear_trail", 10, [this](const std_msgs::msg::Bool::SharedPtr msg) {
+        "sdc/clear_trail", command_qos, [this](const std_msgs::msg::Bool::SharedPtr msg) {
           if (msg->data) { trail_.clear(); RCLCPP_INFO(get_logger(), "行驶轨迹已清除"); }
-        });
-    // 切换速度控制算法（自动模式）
-    algo_sub_ = create_subscription<std_msgs::msg::Int32>(
-        "sdc/control_algo", 10, [this](const std_msgs::msg::Int32::SharedPtr msg) {
-          int a = msg->data;
-          if (a == 1)      driver_.velocity_ctrl().set_algorithm(VelocityAlgorithm::kBangBang);
-          else if (a == 2) driver_.velocity_ctrl().set_algorithm(VelocityAlgorithm::kRamp);
-          else             driver_.velocity_ctrl().set_algorithm(VelocityAlgorithm::kPid);
-          RCLCPP_INFO(get_logger(), "速度控制算法切换为: %s",
-                      velocity_algorithm_name(driver_.velocity_ctrl().algorithm()));
-        });
-    // 切换局部规划算法（自动模式）
-    planning_sub_ = create_subscription<std_msgs::msg::Int32>(
-        "sdc/planning_algo", 10, [this](const std_msgs::msg::Int32::SharedPtr msg) {
-          int a = msg->data;
-          auto algo = (a == 1) ? AutoDriver::PlanningAlgorithm::kEm
-                               : AutoDriver::PlanningAlgorithm::kLattice;
-          driver_.set_planning_algorithm(algo);
-          RCLCPP_INFO(get_logger(), "局部规划算法切换为: %s",
-                      AutoDriver::planning_algorithm_name(algo));
-        });
-    // 切换横向控制算法（自动模式）
-    lateral_sub_ = create_subscription<std_msgs::msg::Int32>(
-        "sdc/lateral_algo", 10, [this](const std_msgs::msg::Int32::SharedPtr msg) {
-          int a = msg->data;
-          AutoDriver::LateralAlgorithm algo;
-          if (a == 1)      algo = AutoDriver::LateralAlgorithm::kLqr;
-          else if (a == 2) algo = AutoDriver::LateralAlgorithm::kMpc;
-          else             algo = AutoDriver::LateralAlgorithm::kStanley;
-          driver_.set_lateral_algorithm(algo);
-          RCLCPP_INFO(get_logger(), "横向控制算法切换为: %s",
-                      AutoDriver::lateral_algorithm_name(algo));
-        });
-    // 行为树基础行为切换（0=规则决策 1=行为树）
-    bt_sub_ = create_subscription<std_msgs::msg::Int32>(
-        "sdc/behavior_tree", 10, [this](const std_msgs::msg::Int32::SharedPtr msg) {
-          bool on = (msg->data != 0);
-          driver_.set_use_behavior_tree(on);
-          RCLCPP_INFO(get_logger(), "基础行为切换: %s",
-                      on ? "行为树 (BehaviorTree.CPP v3)" : "规则决策");
         });
     // 驾驶模式切换（0=自动 1=手动）
     set_mode_sub_ = create_subscription<std_msgs::msg::Int32>(
-        "sdc/set_mode", 10, [this](const std_msgs::msg::Int32::SharedPtr msg) {
+        "sdc/set_mode", command_qos, [this](const std_msgs::msg::Int32::SharedPtr msg) {
           set_mode(msg->data == 1 ? Mode::kManual : Mode::kAuto);
         });
     // 手动控制指令（WASD 键盘）
     manual_sub_ = create_subscription<geometry_msgs::msg::Twist>(
-        "sdc/manual_cmd", 10,
+        "sdc/manual_cmd", command_qos,
         [this](const geometry_msgs::msg::Twist::SharedPtr msg) {
           manual_throttle_ = msg->linear.x;   // W/S：油门（>0 前进，<0 倒车）
           manual_steer_    = msg->angular.z;   // A/D：转向（-1..1）
         });
     // 重置小车到起点
     reset_sub_ = create_subscription<std_msgs::msg::Bool>(
-        "sdc/reset_car", 10, [this](const std_msgs::msg::Bool::SharedPtr msg) {
+        "sdc/reset_car", command_qos, [this](const std_msgs::msg::Bool::SharedPtr msg) {
           if (msg->data) { reset_car(); }
+        });
+    estop_sub_ = create_subscription<std_msgs::msg::Bool>(
+        "sdc/emergency_stop", rclcpp::QoS(1).reliable(),
+        [this](const std_msgs::msg::Bool::SharedPtr msg) {
+          simulation_.requestEmergencyStop(msg->data);
+          RCLCPP_WARN(get_logger(), "软件急停: %s", msg->data ? "ACTIVE" : "CLEARED");
         });
 
     tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
@@ -199,10 +317,10 @@ public:
     set_mode(initial_mode == 1 ? Mode::kManual : Mode::kAuto);
 
     timer_ = create_wall_timer(
-        std::chrono::duration<double>(SIM_DT),
+        std::chrono::duration<double>(sim_dt_),
         std::bind(&RingRoadSimNode::simulation_step, this));
     lidar_timer_ = create_wall_timer(
-        std::chrono::milliseconds(100),
+        std::chrono::duration<double>(1.0 / lidar_rate_hz),
         std::bind(&RingRoadSimNode::publish_lidar, this));
 
     load_map(MapType::kRing);
@@ -213,10 +331,94 @@ public:
 private:
   enum class Mode { kAuto = 0, kManual = 1 };
 
+  rclcpp_action::GoalResponse handle_mission_goal(
+      const rclcpp_action::GoalUUID&,
+      std::shared_ptr<const ExecuteMission::Goal> goal) {
+    if (goal->mission_id.empty() ||
+        goal->mission_type > ExecuteMission::Goal::RETURN_HOME)
+      return rclcpp_action::GoalResponse::REJECT;
+    if (!goal->header.frame_id.empty() && goal->header.frame_id != world_frame_)
+      return rclcpp_action::GoalResponse::REJECT;
+    if (simulation_.runtime().missions().busy() && !goal->allow_preempt)
+      return rclcpp_action::GoalResponse::REJECT;
+    return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+  }
+
+  rclcpp_action::CancelResponse handle_mission_cancel(
+      const std::shared_ptr<MissionGoalHandle> handle) {
+    if (!active_mission_goal_ || handle != active_mission_goal_)
+      return rclcpp_action::CancelResponse::REJECT;
+    simulation_.cancelMission();
+    return rclcpp_action::CancelResponse::ACCEPT;
+  }
+
+  void handle_mission_accepted(const std::shared_ptr<MissionGoalHandle> handle) {
+    const auto goal = handle->get_goal();
+    if (active_mission_goal_ && goal->allow_preempt) {
+      auto previous_result = std::make_shared<ExecuteMission::Result>();
+      previous_result->success = false;
+      previous_result->final_state = "CANCELED";
+      previous_result->reason = "preempted_by_new_mission";
+      active_mission_goal_->abort(previous_result);
+      active_mission_goal_.reset();
+    }
+    domain::Mission mission;
+    mission.id = goal->mission_id;
+    mission.type = static_cast<domain::MissionType>(goal->mission_type);
+    mission.speed_limit = goal->speed_limit;
+    mission.goal_tolerance = goal->goal_tolerance;
+    mission.timeout_s = goal->timeout_s;
+    for (const auto& pose : goal->route)
+      mission.route.push_back({pose.x, pose.y, pose.theta});
+    if (!simulation_.setMission(std::move(mission), goal->allow_preempt)) {
+      auto result = std::make_shared<ExecuteMission::Result>();
+      result->success = false;
+      result->final_state = "REJECTED";
+      result->reason = simulation_.runtime().missions().lastError();
+      handle->abort(result);
+      return;
+    }
+    active_mission_goal_ = handle;
+  }
+
+  void update_mission_action() {
+    if (!active_mission_goal_) return;
+    const auto& mission = simulation_.runtime().missions().current();
+    if (!mission) return;
+    auto feedback = std::make_shared<ExecuteMission::Feedback>();
+    feedback->state = mission_state_name(mission->state);
+    feedback->progress = mission->progress;
+    feedback->reason = mission->result_reason;
+    active_mission_goal_->publish_feedback(feedback);
+    const bool terminal = mission->state == domain::MissionState::kSucceeded ||
+                          mission->state == domain::MissionState::kFailed ||
+                          mission->state == domain::MissionState::kCanceled;
+    if (!terminal) return;
+    auto result = std::make_shared<ExecuteMission::Result>();
+    result->success = mission->state == domain::MissionState::kSucceeded;
+    result->final_state = mission_state_name(mission->state);
+    result->reason = mission->result_reason;
+    if (mission->state == domain::MissionState::kSucceeded)
+      active_mission_goal_->succeed(result);
+    else if (mission->state == domain::MissionState::kCanceled)
+      active_mission_goal_->canceled(result);
+    else
+      active_mission_goal_->abort(result);
+    active_mission_goal_.reset();
+  }
+
   // ========== 地图加载 ==========
   void load_map(MapType t) {
     map_ = create_map(t);
-    driver_.reset(map_.get());
+    AckermannModel initial_vehicle;
+    map_->reset(initial_vehicle);
+    simulation_.reset(initial_vehicle.x(), initial_vehicle.y(), initial_vehicle.yaw());
+    domain::Mission mission;
+    mission.id = "ring-demo";
+    mission.type = domain::MissionType::kFollowRoute;
+    mission.route = map_->reference_path();
+    mission.speed_limit = 2.0;
+    simulation_.setMission(std::move(mission));
     trail_.clear();
     driving_ = true;
     paused_ = false;
@@ -236,7 +438,15 @@ private:
 
   // 重置小车到环形起点
   void reset_car() {
-    driver_.reset(map_.get());
+    AckermannModel initial_vehicle;
+    map_->reset(initial_vehicle);
+    simulation_.reset(initial_vehicle.x(), initial_vehicle.y(), initial_vehicle.yaw());
+    domain::Mission mission;
+    mission.id = "ring-demo";
+    mission.type = domain::MissionType::kFollowRoute;
+    mission.route = map_->reference_path();
+    mission.speed_limit = 2.0;
+    simulation_.setMission(std::move(mission));
     trail_.clear();
     manual_throttle_ = 0.0;
     manual_steer_ = 0.0;
@@ -245,33 +455,35 @@ private:
 
   // ========== 仿真主循环 ==========
   void simulation_step() {
+    const auto loop_started = std::chrono::steady_clock::now();
     if (driving_ && !paused_) {
       // 动态随机障碍物
-      obstacle_manager_.update(SIM_DT);
-      std::vector<Obstacle> extra;
-      for (const auto& ob : obstacle_manager_.obstacles())
-        extra.push_back(Obstacle{Vec2{ob.x, ob.y}, ob.radius});
-      driver_.set_extra_obstacles(extra);
-
+      obstacle_manager_.update(sim_dt_);
       if (mode_ == Mode::kManual) {
         // 手动驾驶：WASD 直接控制
         double throttle = manual_throttle_;
         double steer = manual_steer_;
         // 当没有任何按键时，松开油门即减速至 0（回归中性）
         last_action_ = Action::kCruise;
-        driver_.manual_step(throttle, steer, SIM_DT);
+        simulation_.manualStep(throttle, steer, sim_dt_);
         last_front_dist_ = driver_front_dist();
       } else {
-        // 自动驾驶：目标点为沿环前进的虚拟点（基于小车当前位置持续前移）
-        Vec2 target = map_->goal_point_ahead(driver_.car());
-        auto res = driver_.step(target, false, SIM_DT);
-        last_front_dist_ = res.front_dist;
-        last_action_ = res.action;
+        std::vector<domain::Obstacle> runtime_obstacles;
+        int obstacle_id = 0;
+        for (const auto& ob : map_->to_obstacles())
+          runtime_obstacles.push_back({"static-" + std::to_string(obstacle_id++), {ob.position.x, ob.position.y, 0.0}, ob.radius, false});
+        for (const auto& ob : obstacle_manager_.obstacles())
+          runtime_obstacles.push_back({"dynamic-" + std::to_string(obstacle_id++), {ob.x, ob.y, 0.0}, ob.radius, true});
+        simulation_.setObstacles(std::move(runtime_obstacles));
+        const auto output = simulation_.step(sim_dt_);
+        last_front_dist_ = driver_front_dist();
+        last_action_ = output.control.target_speed < 0.05 ? Action::kStop :
+                       output.control.target_speed < 1.0 ? Action::kBrake : Action::kCruise;
       }
 
       // 记录轨迹
-      sim_time_ += SIM_DT;
-      trail_.push_back(make_point(driver_.car().x(), driver_.car().y(), 0.05));
+      sim_time_ += sim_dt_;
+      trail_.push_back(make_point(simulation_.vehicle().x(), simulation_.vehicle().y(), 0.05));
       if (trail_.size() > TRAIL_MAX_POINTS) trail_.pop_front();
 
       if (static_cast<int>(sim_time_ * 10) % 5 == 0 &&
@@ -279,21 +491,25 @@ private:
         RCLCPP_INFO(get_logger(),
                     "[%.1fs] 模式:%-6s | 速度:%.2f | 前方:%.2f | 行为:%-6s",
                     sim_time_, mode_ == Mode::kManual ? "手动" : "自动",
-                    driver_.speed(), last_front_dist_, action_name(last_action_));
+                    simulation_.vehicle().speed(), last_front_dist_, action_name(last_action_));
       }
     }
 
+    update_mission_action();
     publish_status();
     publish_car_marker();
     publish_obstacles_marker();
     publish_lattice_marker();
     publish_car_tf();
 
-    road_resend_accum_ += SIM_DT;
+    road_resend_accum_ += sim_dt_;
     if (road_resend_accum_ >= 2.0) {
       road_resend_accum_ = 0.0;
       publish_road_markers();
     }
+    const auto loop_finished = std::chrono::steady_clock::now();
+    last_loop_duration_ms_ = std::chrono::duration<double, std::milli>(
+        loop_finished - loop_started).count();
   }
 
   // 手动模式下计算前方障碍距离（含静态复杂路况 + 动态障碍）
@@ -301,7 +517,7 @@ private:
     auto obstacles = map_->to_obstacles();
     for (const auto& ob : obstacle_manager_.obstacles())
       obstacles.push_back(Obstacle{Vec2{ob.x, ob.y}, ob.radius});
-    double cx = driver_.car().x(), cy = driver_.car().y(), cyaw = driver_.car().yaw();
+    double cx = simulation_.vehicle().x(), cy = simulation_.vehicle().y(), cyaw = simulation_.vehicle().yaw();
     const double fx = std::cos(cyaw), fy = std::sin(cyaw);
     double min_d = LIDAR_RANGE;
     for (const auto& ob : obstacles) {
@@ -316,7 +532,7 @@ private:
   // ========== 状态话题发布 ==========
   void publish_status() {
     auto f = [](double v) { auto m = std_msgs::msg::Float64(); m.data = v; return m; };
-    speed_pub_->publish(f(driver_.speed()));
+    speed_pub_->publish(f(simulation_.vehicle().speed()));
     action_pub_->publish(f(static_cast<double>(static_cast<int>(last_action_))));
     distance_pub_->publish(f(last_front_dist_));
     obstacle_pub2_->publish(f(static_cast<double>(obstacle_manager_.size())));
@@ -327,17 +543,45 @@ private:
 
     nav_msgs::msg::Odometry odom;
     odom.header.stamp = now();
-    odom.header.frame_id = "world";
-    odom.child_frame_id = "car_base_link";
-    odom.pose.pose.position.x = driver_.car().x();
-    odom.pose.pose.position.y = driver_.car().y();
-    const double yaw = driver_.car().yaw();
+    odom.header.frame_id = world_frame_;
+    odom.child_frame_id = base_frame_;
+    odom.pose.pose.position.x = simulation_.vehicle().x();
+    odom.pose.pose.position.y = simulation_.vehicle().y();
+    const double yaw = simulation_.vehicle().yaw();
     odom.pose.pose.orientation.z = std::sin(yaw / 2.0);
     odom.pose.pose.orientation.w = std::cos(yaw / 2.0);
-    odom.twist.twist.linear.x = driver_.speed();
-    odom.twist.twist.angular.z = driver_.speed() * std::tan(driver_.car().steer()) /
-                                driver_.car().wheelbase();
+    odom.twist.twist.linear.x = simulation_.vehicle().speed();
+    odom.twist.twist.angular.z = simulation_.vehicle().speed() * std::tan(simulation_.vehicle().steer()) /
+                                simulation_.vehicle().wheelbase();
     odometry_pub_->publish(odom);
+    std_msgs::msg::Int32 runtime_state;
+    runtime_state.data = static_cast<int>(simulation_.runtime().output().state);
+    runtime_state_pub_->publish(runtime_state);
+    std_msgs::msg::Int32 fault_count;
+    fault_count.data = static_cast<int>(simulation_.runtime().faults().faults().size());
+    fault_count_pub_->publish(fault_count);
+    std_msgs::msg::Int32 mission_state;
+    std_msgs::msg::Float64 mission_progress;
+    const auto& mission = simulation_.runtime().missions().current();
+    mission_state.data = mission ? static_cast<int>(mission->state) : -1;
+    mission_progress.data = mission ? mission->progress : 0.0;
+    mission_state_pub_->publish(mission_state);
+    mission_progress_pub_->publish(mission_progress);
+
+    const auto stamp = now();
+    const uint64_t sequence = ++message_sequence_;
+    ros::MessageContext context{robot_id_, world_frame_, base_frame_, stamp, sequence};
+    status_pub_->publish(ros::RuntimeMessageConverter::status(
+        simulation_.runtime(), context, true));
+    trajectory_pub_->publish(ros::RuntimeMessageConverter::trajectory(
+        simulation_.runtime(), context));
+    control_command_pub_->publish(ros::RuntimeMessageConverter::control(
+        simulation_.runtime(), context));
+    faults_pub_->publish(ros::RuntimeMessageConverter::faults(
+        simulation_.runtime(), context));
+    metrics_pub_->publish(ros::RuntimeMessageConverter::metrics(
+        simulation_.runtime(), context, last_loop_duration_ms_,
+        configured_loop_hz_));
   }
 
   // ========== 障碍物标记（动态随机障碍 + 静态复杂路况） ==========
@@ -347,7 +591,7 @@ private:
     // 动态障碍（橙色方块）
     for (const auto& ob : obstacle_manager_.obstacles()) {
       visualization_msgs::msg::Marker m;
-      m.header.frame_id = "world"; m.header.stamp = now();
+      m.header.frame_id = world_frame_; m.header.stamp = now();
       m.ns = "obstacles"; m.id = id++;
       m.type = visualization_msgs::msg::Marker::CUBE; m.action = m.ADD;
       m.pose.position.x = ob.x; m.pose.position.y = ob.y; m.pose.position.z = 0.5;
@@ -365,44 +609,28 @@ private:
 
   // ========== 局部规划候选路径可视化（自动模式） ==========
   void publish_lattice_marker() {
-    double cx = driver_.car().x(), cy = driver_.car().y(), cyaw = driver_.car().yaw();
-    auto obstacles = map_->to_obstacles();
-    for (const auto& ob : obstacle_manager_.obstacles())
-      obstacles.push_back(Obstacle{Vec2{ob.x, ob.y}, ob.radius});
-    std::vector<LatticeTrajectory> candidates;
-    // 使用 driver 当前选中的规划算法生成候选（保证可视化与决策一致）
-    if (driver_.planning_algorithm() == AutoDriver::PlanningAlgorithm::kEm)
-      em_planner_.plan(cx, cy, cyaw, obstacles, candidates);
-    else
-      lattice_planner_.plan(cx, cy, cyaw, obstacles, candidates);
-
     visualization_msgs::msg::MarkerArray ma;
-    int id = 0;
-    for (const auto& c : candidates) {
-      visualization_msgs::msg::Marker m;
-      m.header.frame_id = "world"; m.header.stamp = now();
-      m.ns = "lattice_candidates"; m.id = id++;
-      m.type = m.LINE_STRIP; m.action = m.ADD;
-      m.pose.orientation.w = 1.0;
-      m.scale.x = 0.06;
-      if (c.selected) { m.color.r = 0; m.color.g = 1; m.color.b = 0; m.color.a = 1; m.scale.x = 0.18; }
-      else            { m.color.r = 0.6f; m.color.g = 0.6f; m.color.b = 0.6f; m.color.a = 0.35f; }
-      for (const auto& pt : c.path) m.points.push_back(make_point(pt.x, pt.y, 0.12));
-      ma.markers.push_back(m);
-    }
+    visualization_msgs::msg::Marker m;
+    m.header.frame_id = world_frame_; m.header.stamp = now();
+    m.ns = "runtime_trajectory"; m.id = 0; m.type = m.LINE_STRIP; m.action = m.ADD;
+    m.pose.orientation.w = 1.0; m.scale.x = 0.18;
+    m.color.r = 0.0f; m.color.g = 1.0f; m.color.b = 0.25f; m.color.a = 1.0f;
+    for (const auto& point : simulation_.runtime().output().planning.trajectory.points)
+      m.points.push_back(make_point(point.pose.x, point.pose.y, 0.12));
+    ma.markers.push_back(std::move(m));
     plan_pub_->publish(ma);
   }
 
   // ========== LIDAR 点云 ==========
   void publish_lidar() {
-    double cx = driver_.car().x(), cy = driver_.car().y(), cyaw = driver_.car().yaw();
+    double cx = simulation_.vehicle().x(), cy = simulation_.vehicle().y(), cyaw = simulation_.vehicle().yaw();
     auto obstacles = map_->to_obstacles();
     // 合并随机障碍
     for (const auto& ob : obstacle_manager_.obstacles())
       obstacles.push_back(Obstacle{Vec2{ob.x, ob.y}, ob.radius});
 
     sensor_msgs::msg::PointCloud2 cloud;
-    cloud.header.frame_id = "world"; cloud.header.stamp = now();
+    cloud.header.frame_id = world_frame_; cloud.header.stamp = now();
     cloud.height = 1; cloud.width = LIDAR_BEAMS;
     sensor_msgs::PointCloud2Modifier mod(cloud);
     mod.setPointCloud2FieldsByString(1, "xyz");
@@ -436,12 +664,12 @@ private:
   // ========== 小车可视化 ==========
   void publish_car_marker() {
     visualization_msgs::msg::MarkerArray ma;
-    double cx = driver_.car().x(), cy = driver_.car().y(), cyaw = driver_.car().yaw();
+    double cx = simulation_.vehicle().x(), cy = simulation_.vehicle().y(), cyaw = simulation_.vehicle().yaw();
 
     // 车体
     {
       visualization_msgs::msg::Marker m;
-      m.header.frame_id = "world"; m.header.stamp = now();
+      m.header.frame_id = world_frame_; m.header.stamp = now();
       m.ns = "car"; m.id = 0;
       m.type = m.CUBE; m.action = m.ADD;
       m.pose.position.x = cx; m.pose.position.y = cy; m.pose.position.z = 0.5;
@@ -453,12 +681,12 @@ private:
     // 速度矢量
     {
       visualization_msgs::msg::Marker m;
-      m.header.frame_id = "world"; m.header.stamp = now();
+      m.header.frame_id = world_frame_; m.header.stamp = now();
       m.ns = "car"; m.id = 1;
       m.type = m.ARROW; m.action = m.ADD;
       m.pose.position.x = cx; m.pose.position.y = cy; m.pose.position.z = 1.2;
       m.pose.orientation.z = std::sin(cyaw / 2.0); m.pose.orientation.w = std::cos(cyaw / 2.0);
-      m.scale.x = 0.6 + std::fabs(driver_.speed()) * 0.3; m.scale.y = 0.25; m.scale.z = 0.25;
+      m.scale.x = 0.6 + std::fabs(simulation_.vehicle().speed()) * 0.3; m.scale.y = 0.25; m.scale.z = 0.25;
       switch (last_action_) {
         case Action::kAccelerate: m.color.r = 0; m.color.g = 1; m.color.b = 0; break;
         case Action::kCruise:     m.color.r = 0; m.color.g = 0.6f; m.color.b = 1; break;
@@ -471,7 +699,7 @@ private:
     // 行驶轨迹
     if (trail_.size() > 2) {
       visualization_msgs::msg::Marker m;
-      m.header.frame_id = "world"; m.header.stamp = now();
+      m.header.frame_id = world_frame_; m.header.stamp = now();
       m.ns = "planning"; m.id = 1;
       m.type = m.LINE_STRIP; m.action = m.ADD;
       m.pose.orientation.w = 1.0; m.scale.x = 0.08;
@@ -482,7 +710,7 @@ private:
     // 状态文本
     {
       visualization_msgs::msg::Marker m;
-      m.header.frame_id = "world"; m.header.stamp = now();
+      m.header.frame_id = world_frame_; m.header.stamp = now();
       m.ns = "hud"; m.id = 0;
       m.type = m.TEXT_VIEW_FACING; m.action = m.ADD;
       m.pose.position.x = cx; m.pose.position.y = cy; m.pose.position.z = CAR_HEAD_Z;
@@ -490,13 +718,9 @@ private:
       m.color.r = 1; m.color.g = 1; m.color.b = 1; m.color.a = 1;
       char buf[200];
       const char* mode_str = (mode_ == Mode::kManual) ? "手动(WASD)" : "自动";
-      const char* bt_str = driver_.use_behavior_tree() ? "行为树" : "规则";
       std::snprintf(buf, sizeof(buf),
-                    "模式:%s  v=%.1f m/s  %s  %s/%s  [%s]",
-                    mode_str, driver_.speed(), action_name(last_action_),
-                    AutoDriver::planning_algorithm_name(driver_.planning_algorithm()),
-                    AutoDriver::lateral_algorithm_name(driver_.lateral_algorithm()),
-                    bt_str);
+                    "模式:%s  v=%.1f m/s  %s  Runtime/PurePursuit",
+                    mode_str, simulation_.vehicle().speed(), action_name(last_action_));
       m.text = buf;
       ma.markers.push_back(m);
     }
@@ -505,20 +729,26 @@ private:
 
   // ========== 静态道路重发 ==========
   void publish_road_markers() {
-    for (auto& mk : road_markers_.markers) mk.header.stamp = now();
+    for (auto& mk : road_markers_.markers) {
+      mk.header.frame_id = world_frame_;
+      mk.header.stamp = now();
+    }
     road_pub_->publish(road_markers_);
     // 额外标记（路况标签等）
-    for (auto& mk : extra_markers_.markers) mk.header.stamp = now();
+    for (auto& mk : extra_markers_.markers) {
+      mk.header.frame_id = world_frame_;
+      mk.header.stamp = now();
+    }
     if (!extra_markers_.markers.empty()) road_pub_->publish(extra_markers_);
   }
 
   // ========== TF ==========
   void publish_car_tf() {
-    double cx = driver_.car().x(), cy = driver_.car().y(), cyaw = driver_.car().yaw();
+    double cx = simulation_.vehicle().x(), cy = simulation_.vehicle().y(), cyaw = simulation_.vehicle().yaw();
     geometry_msgs::msg::TransformStamped tf;
     tf.header.stamp = now();
-    tf.header.frame_id = "world";
-    tf.child_frame_id = "car_base_link";
+    tf.header.frame_id = world_frame_;
+    tf.child_frame_id = base_frame_;
     tf.transform.translation.x = cx; tf.transform.translation.y = cy; tf.transform.translation.z = 0.0;
     tf.transform.rotation.z = std::sin(cyaw / 2.0);
     tf.transform.rotation.w = std::cos(cyaw / 2.0);
@@ -527,16 +757,21 @@ private:
 
   // ========== 成员 ==========
   std::unique_ptr<ScenarioMap> map_;
-  AutoDriver driver_;
+  simulation::SimulationEngine simulation_;
   ObstacleManager obstacle_manager_;
-  LatticePlanner lattice_planner_;
-  EmPlanner em_planner_;
 
   Mode mode_{Mode::kAuto};
   double manual_throttle_{0.0};
   double manual_steer_{0.0};
 
   double sim_time_{0.0};
+  double sim_dt_{0.05};
+  double configured_loop_hz_{20.0};
+  double last_loop_duration_ms_{0.0};
+  uint64_t message_sequence_{0};
+  std::string robot_id_{"car01"};
+  std::string world_frame_{"world"};
+  std::string base_frame_{"car_base_link"};
   double road_resend_accum_{0.0};
   double last_front_dist_{LIDAR_RANGE};
   Action last_action_{Action::kCruise};
@@ -558,17 +793,27 @@ private:
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr obstacle_pub2_;
   rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr mode_pub_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odometry_pub_;
+  rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr runtime_state_pub_;
+  rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr fault_count_pub_;
+  rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr mission_state_pub_;
+  rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr mission_progress_pub_;
+  rclcpp::Publisher<self_driving_car_demo::msg::Trajectory>::SharedPtr trajectory_pub_;
+  rclcpp::Publisher<self_driving_car_demo::msg::ControlCommand>::SharedPtr control_command_pub_;
+  rclcpp::Publisher<self_driving_car_demo::msg::RuntimeStatus>::SharedPtr status_pub_;
+  rclcpp::Publisher<self_driving_car_demo::msg::FaultArray>::SharedPtr faults_pub_;
+  rclcpp::Publisher<self_driving_car_demo::msg::RuntimeMetrics>::SharedPtr metrics_pub_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr health_service_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr recovery_service_;
 
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr start_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr pause_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr clear_sub_;
-  rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr algo_sub_;
-  rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr planning_sub_;
-  rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr lateral_sub_;
-  rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr bt_sub_;
   rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr set_mode_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr manual_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr reset_sub_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr estop_sub_;
+  rclcpp_action::Server<ExecuteMission>::SharedPtr mission_action_server_;
+  std::shared_ptr<MissionGoalHandle> active_mission_goal_;
 
   rclcpp::TimerBase::SharedPtr timer_;
   rclcpp::TimerBase::SharedPtr lidar_timer_;

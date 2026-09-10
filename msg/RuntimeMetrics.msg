@@ -1,0 +1,8 @@
+std_msgs/Header header
+uint64 sequence
+string robot_id
+float64 loop_duration_ms
+float64 configured_loop_hz
+uint32 trajectory_points
+uint32 active_faults
+uint8 runtime_state

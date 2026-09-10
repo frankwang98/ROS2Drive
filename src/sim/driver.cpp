@@ -211,4 +211,13 @@ double AutoDriver::manual_step(double throttle, double steer_cmd, double dt) {
   return speed_;
 }
 
+void AutoDriver::apply_control(const domain::ControlCommand& command, double dt) {
+  const double requested_speed = (command.emergency_stop || command.brake >= 0.99)
+                                     ? 0.0 : command.target_speed;
+  speed_ = velocity_controller_.update(requested_speed, speed_, dt);
+  car_.update(speed_, command.steering_angle, dt);
+  speed_ = car_.speed();
+  reversing_ = speed_ < -0.1;
+}
+
 }  // namespace sdc

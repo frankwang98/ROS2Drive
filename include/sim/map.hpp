@@ -10,7 +10,8 @@
 #include <geometry_msgs/msg/point.hpp>
 
 #include "model/ackermann_model.hpp"
-#include "planning/lattice_planner.hpp"
+#include "domain/autonomy_types.hpp"
+#include "sim/scene_types.hpp"
 
 namespace sdc {
 
@@ -57,6 +58,9 @@ class ScenarioMap {
   /// 边界 / 复杂路型（slalom、窄门、路障）作为障碍物（供 Lattice 避障用）。
   virtual std::vector<Obstacle> to_obstacles() const = 0;
 
+  /// 场景向 Runtime 提供的通用参考路线。核心 planner 不知道场景几何类型。
+  virtual std::vector<domain::Pose2D> reference_path() const = 0;
+
   /// 场景特有的可视信息（如路况标识文字），默认空。
   virtual visualization_msgs::msg::MarkerArray build_extra_markers() const {
     return visualization_msgs::msg::MarkerArray{};
@@ -93,6 +97,7 @@ class RingMap : public ScenarioMap {
   Vec2 goal_point_ahead(const CarState& car) const override;
   bool goal_reached(const CarState& car) const override;
   std::vector<Obstacle> to_obstacles() const override;
+  std::vector<domain::Pose2D> reference_path() const override;
 
   double radius() const { return radius_; }
   double road_width() const { return road_width_; }

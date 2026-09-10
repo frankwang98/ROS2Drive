@@ -3,19 +3,9 @@
 
 #include <vector>
 
+#include "sim/scene_types.hpp"
+
 namespace sdc {
-
-/// 二维点。
-struct Vec2 {
-  double x = 0.0;
-  double y = 0.0;
-};
-
-/// 障碍物（世界坐标，圆形近似）。
-struct Obstacle {
-  Vec2 position;
-  double radius = 1.0;  // 障碍物半径（米）
-};
 
 /// 一条局部候选轨迹（世界坐标点序列）。
 struct LatticeTrajectory {

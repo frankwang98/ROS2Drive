@@ -1,18 +1,37 @@
 cmake_minimum_required(VERSION 3.10)
-project(self_driving_car_demo LANGUAGES CXX)
+# rosidl generates both C and C++ support libraries even though Runtime itself
+# is C++. Keep C enabled or the generated *_rosidl_generator_c target has no
+# build rule on ROS 2 Jazzy/Humble.
+project(self_driving_car_demo LANGUAGES C CXX)
 
 # ============================================================
 # ROS2 / ament 构建
 # ============================================================
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_action REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(builtin_interfaces REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/TrajectoryPoint.msg"
+  "msg/Trajectory.msg"
+  "msg/ControlCommand.msg"
+  "msg/Fault.msg"
+  "msg/FaultArray.msg"
+  "msg/RuntimeStatus.msg"
+  "msg/RuntimeMetrics.msg"
+  "action/ExecuteMission.action"
+  DEPENDENCIES builtin_interfaces std_msgs geometry_msgs
+)
 
 # RViz 自定义面板插件（可选依赖）
 # 基础环境缺少 rviz_common / Qt5 时自动跳过，不影响核心仿真构建
@@ -44,28 +63,43 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# ---- 核心算法库（纯逻辑，不依赖 ROS）----
+# ---- 场景无关 Runtime 核心（严格不依赖 ROS）----
+add_library(sdc_runtime_core STATIC
+  src/simulation/simulation_engine.cpp
+  src/vehicle/simulated_vehicle.cpp
+  src/replay/runtime_replay.cpp
+  src/runtime/vehicle_runtime.cpp
+  src/control/trajectory_controller.cpp
+  src/mission/mission_manager.cpp
+  src/safety/fault_manager.cpp
+  src/safety/safety_manager.cpp
+  src/planning/reference_path_planner.cpp
+  src/planning/velocity_planner.cpp
+  src/control/pid_controller.cpp
+  src/control/velocity_controller.cpp
+  src/model/ackermann_model.cpp
+)
+target_include_directories(sdc_runtime_core PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# ---- 默认教学场景 adapter；map/visualization 仍依赖 ROS ----
+# 旧 Lattice/EM/AutoDriver 及旧横向控制器带有环道几何假设，
+# 仅保留源码供对照，不进入正式 Runtime 或默认产物。
 add_library(sdc_core STATIC
   src/sensor/distance_sensor.cpp
   src/decision/decision_maker.cpp
   src/control/motor_controller.cpp
-  src/control/pid_controller.cpp
-  src/control/velocity_controller.cpp
-  src/control/steering_controller.cpp
-  src/control/lqr_controller.cpp
-  src/control/mpc_controller.cpp
-  src/model/ackermann_model.cpp
-  src/planning/lattice_planner.cpp
-  src/planning/em_planner.cpp
   src/sim/obstacle_manager.cpp
   src/behavior_tree/behavior_tree_planner.cpp
+  src/behavior_tree/behavior_tree_behavior.cpp
   src/sim/map.cpp
-  src/sim/driver.cpp
   src/car/car.cpp
 )
 target_include_directories(sdc_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+target_link_libraries(sdc_core sdc_runtime_core)
 # map.cpp / map.hpp 依赖 visualization_msgs 与 geometry_msgs，
 # 必须把对应 ROS 包的头文件路径传给 sdc_core（否则 colcon 找不到相关头文件）。
 ament_target_dependencies(sdc_core
@@ -77,6 +111,13 @@ ament_target_dependencies(sdc_core
 if(SDC_BUILD_BEHAVIOR_TREE)
   target_compile_definitions(sdc_core PUBLIC BEHAVIORTREE_CPP_V3_FOUND)
   ament_target_dependencies(sdc_core behaviortree_cpp_v3)
+endif()
+
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(sdc_runtime_tests test/runtime_core_test.cpp)
+  target_link_libraries(sdc_runtime_tests sdc_runtime_core)
+  target_include_directories(sdc_runtime_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 endif()
 
 # ---- 旧版单机 demo（保留，方便对比）----
@@ -93,9 +134,18 @@ target_include_directories(demo_car PRIVATE
 add_executable(ring_road_sim
   src/ros2/ring_road_sim_node.cpp
 )
+rosidl_get_typesupport_target(sdc_rosidl_typesupport ${PROJECT_NAME} "rosidl_typesupport_cpp")
+add_library(sdc_ros_adapter STATIC src/ros/runtime_message_converter.cpp)
+add_dependencies(sdc_ros_adapter ${PROJECT_NAME}__rosidl_generator_cpp)
+target_include_directories(sdc_ros_adapter PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(sdc_ros_adapter sdc_runtime_core ${sdc_rosidl_typesupport})
+ament_target_dependencies(sdc_ros_adapter builtin_interfaces std_msgs geometry_msgs)
+target_link_libraries(ring_road_sim sdc_ros_adapter ${sdc_rosidl_typesupport})
 ament_target_dependencies(ring_road_sim
   rclcpp
+  rclcpp_action
   std_msgs
+  std_srvs
   visualization_msgs
   geometry_msgs
   sensor_msgs
@@ -105,21 +155,6 @@ ament_target_dependencies(ring_road_sim
 )
 target_link_libraries(ring_road_sim sdc_core)
 target_include_directories(ring_road_sim PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-# ---- ROS2 小车控制器节点 ----
-add_executable(car_controller
-  src/ros2/car_controller_node.cpp
-)
-ament_target_dependencies(car_controller
-  rclcpp
-  std_msgs
-  visualization_msgs
-  geometry_msgs
-)
-target_link_libraries(car_controller sdc_core)
-target_include_directories(car_controller PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
@@ -161,13 +196,18 @@ endif()
 
 # ---- 安装 ----
 install(TARGETS
+  sdc_runtime_core
+  sdc_core
+  sdc_ros_adapter
   demo_car
   ring_road_sim
-  car_controller
   DESTINATION lib/${PROJECT_NAME}
 )
 
-install(DIRECTORY launch/ rviz/
+# Preserve resource directory names. A trailing slash here would flatten all
+# files into share/${PROJECT_NAME}, while launch resolves config/... and
+# rviz/... beneath the package share directory.
+install(DIRECTORY launch rviz config docs
   DESTINATION share/${PROJECT_NAME}
 )
 

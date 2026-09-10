@@ -4,7 +4,7 @@
 #include <random>
 #include <vector>
 
-#include "planning/lattice_planner.hpp"
+#include "sim/scene_types.hpp"
 
 namespace sdc {
 
@@ -21,8 +21,8 @@ struct RingObstacle {
 /// 随机障碍物管理器。
 ///
 /// 在环形道路上按一定概率随机生成障碍物（位置、大小、存活时长随机），
-/// 存活期结束后自动移除。可把当前活跃障碍物转换为 lattice planner
-/// 所需的 Obstacle 列表，也便于在 RViz 中绘制。
+/// 存活期结束后自动移除。可把当前活跃障碍物转换为世界坐标
+/// Obstacle 列表，也便于在 RViz 中绘制。
 class ObstacleManager {
  public:
   explicit ObstacleManager(double ring_radius = 25.0,
@@ -38,7 +38,7 @@ class ObstacleManager {
   /// 活跃障碍物（world 坐标）。
   const std::vector<RingObstacle>& obstacles() const { return obstacles_; }
 
-  /// 转为 lattice planner 使用的世界坐标障碍物列表。
+  /// 转为世界坐标障碍物列表。
   std::vector<Obstacle> to_planner_obstacles() const;
 
  private:

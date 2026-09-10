@@ -1,0 +1,13 @@
+std_msgs/Header header
+uint64 sequence
+string robot_id
+string runtime_state
+string mission_id
+string mission_type
+string mission_state
+float64 mission_progress
+string result_reason
+bool localized
+bool healthy
+bool recovery_required
+bool recovery_ready

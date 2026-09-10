@@ -63,6 +63,9 @@ class AutoDriver {
   /// @return 当前车速（m/s）
   double manual_step(double throttle, double steer_cmd, double dt);
 
+  /// Runtime/实车适配器入口：应用已经过 Safety 仲裁的领域控制指令。
+  void apply_control(const domain::ControlCommand& command, double dt);
+
   // ========== 规控算法切换 ==========
   static const char* planning_algorithm_name(PlanningAlgorithm a);
   static const char* lateral_algorithm_name(LateralAlgorithm a);

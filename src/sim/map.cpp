@@ -96,6 +96,17 @@ bool RingMap::goal_reached(const CarState& /*car*/) const {
   return false;  // 环道为无限行驶，不判定完成
 }
 
+std::vector<domain::Pose2D> RingMap::reference_path() const {
+  std::vector<domain::Pose2D> path;
+  path.reserve(segments_ + 1);
+  for (int i = 0; i <= segments_; ++i) {
+    const double angle = 2.0 * M_PI * i / segments_;
+    const auto p = point_on_ring(angle);
+    path.push_back({p.x, p.y, angle + M_PI_2});
+  }
+  return path;
+}
+
 // ---- 静态路况障碍物（slalom 桩桶 / 窄门 / 路障） ----
 // 自动/手动驾驶都会把它们当作障碍物参与避障与 LIDAR。
 std::vector<Obstacle> RingMap::to_obstacles() const {
