@@ -70,6 +70,8 @@
 #include "simulation/simulation_engine.hpp"
 #include "behavior_tree/behavior_tree_behavior.hpp"
 #include "ros/runtime_message_converter.hpp"
+#include "scenario/ring_scenario.hpp"
+#include "scenario/mining_haul_scenario.hpp"
 
 using namespace std::chrono_literals;
 using namespace sdc;
@@ -141,8 +143,28 @@ public:
     const double update_rate_hz = declare_parameter<double>("update_rate_hz", 20.0);
     const double lidar_rate_hz = declare_parameter<double>("lidar_rate_hz", 10.0);
     const std::string bt_xml = declare_parameter<std::string>("bt_xml", "");
-    const std::string bt_tree_id =
-        declare_parameter<std::string>("bt_tree_id", "RingDemo");
+    const std::string scenario_id =
+        declare_parameter<std::string>("scenario", "ring_demo");
+    const std::string configured_behavior_profile =
+        declare_parameter<std::string>("behavior_profile", "auto");
+    // Compatibility alias. Prefer behavior_profile for new launch files.
+    const std::string legacy_bt_tree_id =
+        declare_parameter<std::string>("bt_tree_id", "");
+    if (scenario_id == "ring_demo") {
+      scenario_definition_ = scenario::makeRingScenarioDefinition();
+      map_ = create_map(MapType::kRing);
+    } else if (scenario_id == "mining_haul") {
+      scenario_definition_ = scenario::makeMiningHaulScenarioDefinition();
+      map_ = std::make_unique<DefinitionScenarioMap>(scenario_definition_);
+    } else {
+      throw std::invalid_argument("unsupported scenario: " + scenario_id);
+    }
+    const std::string behavior_profile =
+        !legacy_bt_tree_id.empty()
+            ? legacy_bt_tree_id
+            : (configured_behavior_profile == "auto"
+                   ? scenario_definition_.default_behavior_profile
+                   : configured_behavior_profile);
     planning::ReferencePathPlanner::Config planner_config;
     planner_config.spacing = declare_parameter<double>("planner.spacing", 0.25);
     planner_config.horizon = declare_parameter<double>("planner.horizon", 30.0);
@@ -178,8 +200,8 @@ public:
     safety_config.policies[domain::FaultCode::kEmergencyStop] = fault_action_from_string(
         declare_parameter<std::string>("safety.policies.emergency_stop", "estop"));
     if (robot_id_.empty() || world_frame_.empty() || base_frame_.empty() ||
-        bt_tree_id.empty())
-      throw std::invalid_argument("robot_id, frames and bt_tree_id must not be empty");
+        behavior_profile.empty())
+      throw std::invalid_argument("robot_id, frames and behavior_profile must not be empty");
     if (update_rate_hz < 1.0 || update_rate_hz > 100.0 ||
         lidar_rate_hz < 1.0 || lidar_rate_hz > 50.0)
       throw std::invalid_argument("update_rate_hz or lidar_rate_hz outside supported range");
@@ -193,7 +215,7 @@ public:
     configured_loop_hz_ = update_rate_hz;
     if (!bt_xml.empty()) {
       auto behavior =
-          std::make_unique<BehaviorTreeBehavior>(bt_xml, bt_tree_id);
+          std::make_unique<BehaviorTreeBehavior>(bt_xml, behavior_profile);
       if (!behavior->configurationAccepted())
         throw std::invalid_argument("BehaviorTree configuration rejected: " +
                                     behavior->lastError());
@@ -323,9 +345,10 @@ public:
         std::chrono::duration<double>(1.0 / lidar_rate_hz),
         std::bind(&RingRoadSimNode::publish_lidar, this));
 
-    load_map(MapType::kRing);
+    load_scenario();
 
-    RCLCPP_INFO(get_logger(), "自动驾驶仿真启动：环形道路（自动/手动驾驶，WASD 控制）");
+    RCLCPP_INFO(get_logger(), "自动驾驶仿真启动：%s (Behavior=%s)",
+                scenario_definition_.id.c_str(), behavior_profile.c_str());
   }
 
 private:
@@ -408,24 +431,15 @@ private:
   }
 
   // ========== 地图加载 ==========
-  void load_map(MapType t) {
-    map_ = create_map(t);
-    AckermannModel initial_vehicle;
-    map_->reset(initial_vehicle);
-    simulation_.reset(initial_vehicle.x(), initial_vehicle.y(), initial_vehicle.yaw());
-    domain::Mission mission;
-    mission.id = "ring-demo";
-    mission.type = domain::MissionType::kFollowRoute;
-    mission.route = map_->reference_path();
-    mission.speed_limit = 2.0;
-    simulation_.setMission(std::move(mission));
+  void load_scenario() {
+    install_default_scenario_mission();
     trail_.clear();
     driving_ = true;
     paused_ = false;
     road_markers_ = map_->build_road_markers();
     extra_markers_ = map_->build_extra_markers();
     publish_road_markers();
-    RCLCPP_INFO(get_logger(), "已加载地图: %s", map_->name().c_str());
+    RCLCPP_INFO(get_logger(), "已加载场景: %s", map_->name().c_str());
   }
 
   void set_mode(Mode m) {
@@ -436,21 +450,23 @@ private:
                 (mode_ == Mode::kManual ? "手动(WASD)" : "自动"));
   }
 
-  // 重置小车到环形起点
+  // 重置小车到当前场景起点
   void reset_car() {
-    AckermannModel initial_vehicle;
-    map_->reset(initial_vehicle);
-    simulation_.reset(initial_vehicle.x(), initial_vehicle.y(), initial_vehicle.yaw());
-    domain::Mission mission;
-    mission.id = "ring-demo";
-    mission.type = domain::MissionType::kFollowRoute;
-    mission.route = map_->reference_path();
-    mission.speed_limit = 2.0;
-    simulation_.setMission(std::move(mission));
+    install_default_scenario_mission();
     trail_.clear();
     manual_throttle_ = 0.0;
     manual_steer_ = 0.0;
-    RCLCPP_INFO(get_logger(), "小车已重置到环形起点");
+    RCLCPP_INFO(get_logger(), "小车已重置到场景起点: %s",
+                scenario_definition_.id.c_str());
+  }
+
+  void install_default_scenario_mission() {
+    const auto& pose = scenario_definition_.initial_pose;
+    simulation_.reset(pose.x, pose.y, pose.yaw);
+    auto mission = scenario_definition_.default_mission;
+    mission.id += "-" + std::to_string(++scenario_mission_sequence_);
+    if (!simulation_.setMission(std::move(mission)))
+      throw std::runtime_error("failed to install default scenario mission");
   }
 
   // ========== 仿真主循环 ==========
@@ -458,7 +474,8 @@ private:
     const auto loop_started = std::chrono::steady_clock::now();
     if (driving_ && !paused_) {
       // 动态随机障碍物
-      obstacle_manager_.update(sim_dt_);
+      if (scenario_definition_.id == "ring_demo")
+        obstacle_manager_.update(sim_dt_);
       if (mode_ == Mode::kManual) {
         // 手动驾驶：WASD 直接控制
         double throttle = manual_throttle_;
@@ -757,6 +774,8 @@ private:
 
   // ========== 成员 ==========
   std::unique_ptr<ScenarioMap> map_;
+  scenario::ScenarioDefinition scenario_definition_;
+  uint64_t scenario_mission_sequence_{0};
   simulation::SimulationEngine simulation_;
   ObstacleManager obstacle_manager_;
 

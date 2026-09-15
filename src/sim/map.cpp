@@ -1,8 +1,12 @@
 #include "sim/map.hpp"
 
+#include "scenario/ring_scenario.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <stdexcept>
+#include <utility>
 
 namespace sdc {
 
@@ -97,14 +101,7 @@ bool RingMap::goal_reached(const CarState& /*car*/) const {
 }
 
 std::vector<domain::Pose2D> RingMap::reference_path() const {
-  std::vector<domain::Pose2D> path;
-  path.reserve(segments_ + 1);
-  for (int i = 0; i <= segments_; ++i) {
-    const double angle = 2.0 * M_PI * i / segments_;
-    const auto p = point_on_ring(angle);
-    path.push_back({p.x, p.y, angle + M_PI_2});
-  }
-  return path;
+  return scenario::makeRingScenarioDefinition(radius_, segments_).reference_route;
 }
 
 // ---- 静态路况障碍物（slalom 桩桶 / 窄门 / 路障） ----
@@ -319,6 +316,93 @@ MarkerArray RingMap::build_extra_markers() const {
     ma.markers.push_back(m);
   }
   return ma;
+}
+
+DefinitionScenarioMap::DefinitionScenarioMap(
+    scenario::ScenarioDefinition definition)
+    : definition_(std::move(definition)) {
+  std::string reason;
+  if (!scenario::validate(definition_, reason))
+    throw std::invalid_argument("invalid scenario definition: " + reason);
+}
+
+void DefinitionScenarioMap::reset(CarState& car) const {
+  const auto& pose = definition_.initial_pose;
+  car.reset(pose.x, pose.y, pose.yaw, 0.0, 0.0);
+}
+
+Vec2 DefinitionScenarioMap::goal_point(double) const {
+  const auto& pose = definition_.reference_route.back();
+  return {pose.x, pose.y};
+}
+
+bool DefinitionScenarioMap::goal_reached(const CarState& car) const {
+  const auto goal = goal_point();
+  return std::hypot(car.x() - goal.x, car.y() - goal.y) < 1.0;
+}
+
+std::vector<Obstacle> DefinitionScenarioMap::to_obstacles() const {
+  std::vector<Obstacle> obstacles;
+  obstacles.reserve(definition_.static_obstacles.size());
+  for (const auto& obstacle : definition_.static_obstacles)
+    obstacles.push_back({{obstacle.pose.x, obstacle.pose.y}, obstacle.radius});
+  return obstacles;
+}
+
+MarkerArray DefinitionScenarioMap::build_road_markers() const {
+  MarkerArray markers;
+  Marker road;
+  road.header.frame_id = "world";
+  road.ns = "scenario_road";
+  road.id = 0;
+  road.type = Marker::LINE_STRIP;
+  road.action = Marker::ADD;
+  road.pose.orientation.w = 1.0;
+  road.scale.x = 6.0;
+  road.color.r = 0.22f;
+  road.color.g = 0.22f;
+  road.color.b = 0.25f;
+  road.color.a = 1.0f;
+  for (const auto& pose : definition_.reference_route)
+    road.points.push_back(make_point(pose.x, pose.y, 0.01));
+  markers.markers.push_back(road);
+
+  Marker center = road;
+  center.ns = "scenario_centerline";
+  center.id = 1;
+  center.scale.x = 0.15;
+  center.color.r = 1.0f;
+  center.color.g = 0.8f;
+  center.color.b = 0.1f;
+  center.color.a = 0.9f;
+  center.pose.position.z = 0.04;
+  markers.markers.push_back(std::move(center));
+  return markers;
+}
+
+MarkerArray DefinitionScenarioMap::build_extra_markers() const {
+  MarkerArray markers;
+  const char* labels[] = {"LOAD", "DUMP"};
+  const std::size_t indices[] = {0, definition_.reference_route.size() / 2};
+  for (int i = 0; i < 2; ++i) {
+    const auto& pose = definition_.reference_route[indices[i]];
+    Marker marker;
+    marker.header.frame_id = "world";
+    marker.ns = "scenario_zones";
+    marker.id = i;
+    marker.type = Marker::TEXT_VIEW_FACING;
+    marker.action = Marker::ADD;
+    marker.pose.position = make_point(pose.x, pose.y, 1.8);
+    marker.pose.orientation.w = 1.0;
+    marker.scale.z = 1.5;
+    marker.color.r = i == 0 ? 0.2f : 1.0f;
+    marker.color.g = i == 0 ? 0.9f : 0.5f;
+    marker.color.b = 0.2f;
+    marker.color.a = 1.0f;
+    marker.text = labels[i];
+    markers.markers.push_back(std::move(marker));
+  }
+  return markers;
 }
 
 }  // namespace sdc

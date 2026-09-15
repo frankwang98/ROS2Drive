@@ -65,6 +65,9 @@ endif()
 
 # ---- 场景无关 Runtime 核心（严格不依赖 ROS）----
 add_library(sdc_runtime_core STATIC
+  src/scenario/scenario_definition.cpp
+  src/scenario/ring_scenario.cpp
+  src/scenario/mining_haul_scenario.cpp
   src/simulation/simulation_engine.cpp
   src/vehicle/simulated_vehicle.cpp
   src/replay/runtime_replay.cpp

@@ -7,7 +7,9 @@
     lidar_rate_hz: 10.0
     initial_mode: 0
     bt_xml: ""
-    bt_tree_id: RingDemo
+    scenario: ring_demo
+    behavior_profile: auto
+    bt_tree_id: ""
     planner:
       spacing: 0.25
       horizon: 30.0

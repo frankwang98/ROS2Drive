@@ -12,6 +12,7 @@
 #include "model/ackermann_model.hpp"
 #include "domain/autonomy_types.hpp"
 #include "sim/scene_types.hpp"
+#include "scenario/scenario_definition.hpp"
 
 namespace sdc {
 
@@ -111,6 +112,26 @@ class RingMap : public ScenarioMap {
   double radius_;
   double road_width_;
   int segments_ = 200;
+};
+
+/// Portable ScenarioDefinition 的简易 RViz adapter。
+/// 用路线带、中心线、功能区标签和静态障碍表达非环形教学场景。
+class DefinitionScenarioMap final : public ScenarioMap {
+ public:
+  explicit DefinitionScenarioMap(scenario::ScenarioDefinition definition);
+  std::string name() const override { return definition_.id; }
+  visualization_msgs::msg::MarkerArray build_road_markers() const override;
+  visualization_msgs::msg::MarkerArray build_extra_markers() const override;
+  void reset(CarState& car) const override;
+  Vec2 goal_point(double progress = 0.0) const override;
+  bool goal_reached(const CarState& car) const override;
+  std::vector<Obstacle> to_obstacles() const override;
+  std::vector<domain::Pose2D> reference_path() const override {
+    return definition_.reference_route;
+  }
+
+ private:
+  scenario::ScenarioDefinition definition_;
 };
 
 /// 工厂：根据类型创建地图。

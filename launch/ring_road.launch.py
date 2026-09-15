@@ -56,8 +56,12 @@ def generate_launch_description():
             DeclareLaunchArgument("robot_id", default_value="car01"),
             DeclareLaunchArgument("bt_xml", default_value=default_bt,
                                   description="场景 BehaviorTree XML"),
-            DeclareLaunchArgument("bt_tree_id", default_value="RingDemo",
-                                  description="BehaviorTree ID: RingDemo/MiningHaul/PortTransport/AgricultureRoute"),
+            DeclareLaunchArgument("scenario", default_value="ring_demo",
+                                  description="Scenario: ring_demo/mining_haul"),
+            DeclareLaunchArgument("behavior_profile", default_value="auto",
+                                  description="Behavior profile; auto uses the scenario default"),
+            DeclareLaunchArgument("bt_tree_id", default_value="",
+                                  description="Deprecated alias of behavior_profile"),
 
             # ---------- 自动驾驶仿真节点 ----------
             Node(
@@ -72,6 +76,8 @@ def generate_launch_description():
                         "initial_mode": LaunchConfiguration("mode"),
                         "robot_id": LaunchConfiguration("robot_id"),
                         "bt_xml": LaunchConfiguration("bt_xml"),
+                        "scenario": LaunchConfiguration("scenario"),
+                        "behavior_profile": LaunchConfiguration("behavior_profile"),
                         "bt_tree_id": LaunchConfiguration("bt_tree_id"),
                     },
                 ],

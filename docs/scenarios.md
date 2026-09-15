@@ -16,10 +16,23 @@ Select one explicitly with the `bt_tree_id` ROS/launch parameter. The shared sub
 explicitly remaps `front_dist` and `action`; an unknown ID or malformed XML rejects node
 initialization instead of silently selecting another profile.
 
-These IDs currently select behavior thresholds only. The active map, initial pose, route,
-obstacle generator and vehicle model are still the ring-road teaching setup. The planned
-`scenario` selector will load those environment assets through a ROS-free Scenario Adapter;
-it remains separate from `behavior_profile` so profiles can be tested against any scenario.
+Behavior IDs select thresholds only. The independent `scenario` parameter currently accepts
+`ring_demo` and `mining_haul`; it changes initial pose, route, default mission, deterministic
+obstacles and the simple RViz map. `behavior_profile:=auto` chooses the scenario default,
+while an explicit profile allows cross-combination testing.
+
+```bash
+ros2 launch self_driving_car_demo ring_road.launch.py scenario:=ring_demo
+ros2 launch self_driving_car_demo ring_road.launch.py scenario:=mining_haul
+ros2 launch self_driving_car_demo ring_road.launch.py \
+  scenario:=mining_haul behavior_profile:=RingDemo
+```
+
+The first migration slice is now present: ROS-free `ScenarioDefinition` owns the portable
+contract, and `RingScenarioDefinition` supplies the ring initial pose, closed reference
+route, default FollowRoute mission, vehicle constraints and default `RingDemo` profile.
+RViz markers and ring static-obstacle construction remain in `RingMap` until the adapter
+migration is completed.
 
 ## Failure scenarios
 

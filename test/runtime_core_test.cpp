@@ -8,6 +8,8 @@
 #include "planning/reference_path_planner.hpp"
 #include "runtime/vehicle_runtime.hpp"
 #include "safety/safety_manager.hpp"
+#include "scenario/ring_scenario.hpp"
+#include "scenario/mining_haul_scenario.hpp"
 #include "simulation/simulation_engine.hpp"
 
 namespace {
@@ -23,6 +25,30 @@ class FailingPlanner final : public sdc::planning::Planner {
     return {{}, false, "injected_planning_failure"};
   }
 };
+
+TEST(ScenarioDefinition, RingScenarioIsPortableAndValid) {
+  const auto definition = sdc::scenario::makeRingScenarioDefinition();
+  std::string reason;
+  EXPECT_TRUE(sdc::scenario::validate(definition, reason)) << reason;
+  EXPECT_EQ(definition.id, "ring_demo");
+  EXPECT_EQ(definition.default_behavior_profile, "RingDemo");
+  EXPECT_EQ(definition.default_mission.type, MissionType::kFollowRoute);
+  EXPECT_GT(definition.reference_route.size(), 100u);
+  EXPECT_NEAR(definition.initial_pose.x, 26.0, 1e-9);
+}
+
+TEST(ScenarioDefinition, MiningHaulChangesRouteObstaclesAndProfile) {
+  const auto definition = sdc::scenario::makeMiningHaulScenarioDefinition();
+  std::string reason;
+  EXPECT_TRUE(sdc::scenario::validate(definition, reason)) << reason;
+  EXPECT_EQ(definition.id, "mining_haul");
+  EXPECT_EQ(definition.default_behavior_profile, "MiningHaul");
+  EXPECT_EQ(definition.default_mission.type, MissionType::kFollowRoute);
+  EXPECT_GE(definition.reference_route.size(), 8u);
+  EXPECT_FALSE(definition.static_obstacles.empty());
+  EXPECT_LT(definition.vehicle_constraints.maximum_speed, 2.0);
+  EXPECT_NEAR(definition.initial_pose.x, -32.0, 1e-9);
+}
 
 TEST(MissionManager, ValidatesLifecycleAndPreemption) {
   sdc::mission::MissionManager manager;

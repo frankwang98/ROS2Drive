@@ -37,6 +37,7 @@ Mission / Route / Vehicle State / Obstacles
 - `ros2/`：唯一 ROS 边界；`sim/`：场景、传感器和车辆模型适配器。
 - `ros/`：独立 Domain→ROS typed message converter，避免 Runtime 和仿真节点手写协议映射。
 - `simulation/`：ROS-free 教学仿真执行器，组合车辆模型与同一个 Runtime；不包含地图绘制或 ROS 发布。
+- `scenario/`：ROS-free 场景合同，统一初始位姿、路线、障碍、默认 Mission、车辆约束和 Behavior Profile。
 - `vehicle/`：底盘边界；`VehicleInterface` 统一状态读取、控制执行和健康检查，仿真由 `SimulatedVehicle` 实现，真实 CAN/线控底盘实现相同接口。
 
 ## 统一领域接口
@@ -96,10 +97,15 @@ XML 和 C++ API 明确使用 **BehaviorTree.CPP v3**，不混用 v4 的 `BTCPP_f
 树运行。这些仍属于基础行为策略；装卸点、会车、作业行与地头转弯等业务节点尚未接入
 Runtime。
 
-`bt_tree_id` **不会切换地图**。当前四个 ID 只是可在环形教学场景中交叉
-验证的 Behavior Profile；地图、初始位姿、Mission route、障碍物生成和车辆模型
-仍由 `RingMap` 提供。后续将新增独立 `scenario` 参数和 ROS-free Scenario Adapter，
-再落地矿区、港口和农业的地图/路线/任务。
+`behavior_profile` **不会切换地图**；它只选择行为策略，`auto` 使用当前
+场景的默认 Profile。`scenario` 才选择地图、初始位姿、Mission route、障碍物
+和场景约束。当前已支持 `ring_demo` 与最小 `mining_haul`；港口和农业
+场景仍待实现。`bt_tree_id` 仅作为 `behavior_profile` 的兼容别名保留。
+
+场景地基已开始迁移：`ScenarioDefinition` 和 `RingScenarioDefinition` 不依赖 ROS，
+环形默认位姿、闭合路线、FollowRoute Mission、车辆约束及默认
+`RingDemo` Profile 已由该合同提供。`RingMap` 暂时仍负责 RViz Marker 和环道
+静态障碍，后续再迁到完整 Scenario Adapter。
 
 ## ROS 2 接口收敛目标
 
@@ -151,8 +157,11 @@ source install/setup.bash
 ros2 launch self_driving_car_demo ring_road.launch.py
 # 多车/隔离接口：话题位于 /car01/...
 ros2 launch self_driving_car_demo ring_road.launch.py robot_namespace:=car01
-# 同一 XML 切换矿区场景参数
-ros2 launch self_driving_car_demo ring_road.launch.py bt_tree_id:=MiningHaul
+# 真正切换到最小矿区运输场景（自动选 MiningHaul Profile）
+ros2 launch self_driving_car_demo ring_road.launch.py scenario:=mining_haul
+# 场景和行为策略可交叉组合做测试
+ros2 launch self_driving_car_demo ring_road.launch.py \
+  scenario:=mining_haul behavior_profile:=RingDemo
 ```
 
 本包生成 ROSIDL 的 C/C++ typesupport，因此 CMake 项目同时启用 `C` 和 `CXX`
@@ -167,7 +176,8 @@ colcon build --packages-select self_driving_car_demo --cmake-clean-cache
 产物后重建，否则 ament index 仍可能指向不完整的旧安装空间。
 
 运行参数集中在 `config/runtime.yaml`，当前支持 `robot_id`、`world_frame`、
-`base_frame`、`update_rate_hz`、`lidar_rate_hz`、`initial_mode`、`bt_xml` 和 `bt_tree_id`。launch 可通过
+`base_frame`、`update_rate_hz`、`lidar_rate_hz`、`initial_mode`、`bt_xml`、`scenario` 和
+`behavior_profile`。launch 可通过
 `params_file` 替换整套配置，并可单独覆盖 `robot_id`。空标识以及超出支持范围
 的循环频率会在节点初始化阶段被拒绝。
 

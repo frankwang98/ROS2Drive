@@ -54,14 +54,14 @@
 
 > 当前 `bt_tree_id` 只选择 Behavior Profile；地图、Mission route、障碍物生成和车辆模型仍是环形教学场景。
 
-- [ ] 建立 ROS-free `ScenarioDefinition / ScenarioLoader` 边界，统一提供地图几何、参考路线、初始位姿、静态/动态障碍、默认 Mission 和车辆约束
-- [ ] 将 `scenario` 与 `behavior_profile` 分离参数化；默认绑定但允许交叉组合做回归测试
-- [ ] 将现有 `RingMap` 迁移为 `ring_demo` Scenario Adapter，确保场景切换不修改 `VehicleRuntime`
-- [ ] 实现 `mining_haul` 最小场景：装载点→运输道路→卸载点→返回，区分重载/空载限速与制动约束
+- [~] 已建立 ROS-free `ScenarioDefinition` 及合同校验，统一初始位姿、参考路线、静态障碍、默认 Mission、车辆约束与 Behavior Profile；文件 `ScenarioLoader` 待场景资产格式确定后实现
+- [x] 已将 `scenario` 与 `behavior_profile` 分离参数化；`auto` 选场景默认 Profile，也允许显式交叉组合
+- [~] 已实现 ROS-free `RingScenarioDefinition`，默认位姿/路线/Mission 已从 ROS 节点迁出并由环形 adapter 消费；地图 Marker 与静态障碍仍在 `RingMap`
+- [~] 已实现 `mining_haul` 最小可运行场景：独立起点、闭合运输路线、LOAD/DUMP 可视化、确定性路侧障碍、低速 Mission 与 MiningHaul Profile；重载/空载状态切换待实现
 - [ ] 实现 `port_transport` 最小场景：堆场→路口→岸桥交接点，支持路权/停车线和精准停靠任务
 - [ ] 实现 `agriculture_route` 最小场景：作业行路线、地头转弯和作业机具状态，保持人员/作物安全边界
 - [ ] 为装卸、会车/路权、精准停靠、作业行/地头转弯增加可复用 BT 业务子树，而非把场景逻辑写入 Runtime
-- [ ] 每个场景提供独立 YAML/route 资产、确定性障碍和一键 launch 入口
+- [~] `ring_demo` / `mining_haul` 已可通过同一 launch 的 `scenario` 参数一键切换，矿区已有确定性路线/障碍；独立 YAML 资产及其他场景待实现
 - [ ] 增加场景合同测试：路线有效、初始位姿可行、Behavior Profile 可加载、Mission 可达成、故障仍由 Safety 最终仲裁
 
 验收：`scenario:=ring_demo|mining_haul|port_transport|agriculture_route` 会真正改变地图、路线、任务和环境；`behavior_profile` 只改变行为/安全策略。四个场景共用同一 `VehicleRuntime`、`Trajectory`、`VehicleInterface` 和 ROS 合同。
