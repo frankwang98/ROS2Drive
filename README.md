@@ -70,6 +70,7 @@ Mission: PENDING → ACTIVE ⇄ PAUSED → SUCCEEDED
 ```
 
 任务类型预留 `NavigateTo / FollowRoute / Stop / Park / Dock / ReturnHome`。当前已实现参数校验、忙时拒绝、显式抢占、开始、暂停、恢复、取消、超时、进度、结果原因和终态。`NavigateTo`/非闭合 `FollowRoute` 到达容差范围后成功，闭合 `FollowRoute` 持续循环，`Stop` 在车速降至阈值后成功。后续 ROS Action 适配不改变领域接口。
+矿区默认任务额外使用阶段和载荷状态：`LOAD → HAUL → DUMP → COMPLETE`。Runtime 在装载区和卸载区执行停车确认；当前确认是仿真内置阶段转换，真实装载机/称重/闸门反馈仍待 Vehicle/作业设备 Adapter。
 
 ## 安全机制
 
@@ -107,7 +108,7 @@ Runtime。
 `RingDemo` Profile 已由该合同提供。`RingMap` 暂时仍负责 RViz Marker 和环道
 静态障碍，后续再迁到完整 Scenario Adapter。
 
-MiningHaul 路线现在是一条非闭合的 `LOAD → DUMP` 运输路线，并包含 `z` 高程：路面 Marker、稠密 Trajectory waypoint、ROS
+MiningHaul 路线现在包含 `TransportStart → LOAD → DUMP → ParkingArea` 分段，并包含 `z` 高程：路面 Marker、稠密 Trajectory waypoint、ROS
 `TrajectoryPoint.pose.position.z`、车体 Marker、Odometry 和 TF 都会跟随路线高程显示。
 这一阶段只改善视觉和轨迹高程，车辆动力仍是二维 Ackermann；暂不包含 pitch、坡度阻力或重载动力学。
 
@@ -255,6 +256,18 @@ SimulationEngine 可通过 `enableRecording(true)` 开启内存记录。Mission 
 `controller_type` 切换；Lattice/EM 目前主要用于环道算法实验。
 矿区场景会自动使用更短前视距离（0.8 m / 0.5 s）和 2.8 m 轴距，减少折线路段切弯；仍可通过
 `controller.minimum_lookahead`、`controller.lookahead_time` 覆盖。
+
+矿区默认任务阶段为 `TRANSIT → LOAD(3s) → HAUL → DUMP(3s) → RETURN → PARK`。当前矿区基线
+不注入障碍物，用于先验证路线跟踪和装卸任务闭环；节点日志会
+运输起点和停车点不再被误标成 LOAD/DUMP，只有任务索引指定的装载区、卸载区和停车区会显示标签。
+打印 `stage=...`，并发布 `sdc/mission_stage`（`std_msgs/String`）；RViz 的固定 HUD 同时显示
+阶段、速度和位置，场景标记会显示 LOAD、DUMP、PARK 作业点。稀疏矿区 waypoint 会在
+`ReferencePathPlanner` 内进行端点保持的局部平滑，避免把语义路线拐点直接渲染成矩形轨迹。
+障碍物绕行也使用连续的锥形横向偏移，并在避障区前后渐入/渐出；不会再把每个碰撞 waypoint
+独立横移而生成矩形回环。
+只有膨胀后的障碍物实际侵入参考路径走廊时才触发绕行，路侧安全距离内的物体不会导致无意义拐弯。
+局部避障偏移以最近轨迹点为中心对称渐入/渐出，即使障碍物位于局部规划窗口边缘也不会产生尖角。
+装卸阶段仅对显式提供并满足 `load_index < dump_index < parking_index` 的场景启用，环形道路等普通任务不会误进入 `LOAD`。
 
 默认规划器和控制器现在分别为稳定的 `reference_path` 与 `mpc`。Lattice 已接入但暂作为实验模式，
 因为其旧实现仍依赖环道 Frenet 假设，在障碍物动态切换时会出现候选轨迹抖动。也可通过统一 Adapter 选择：

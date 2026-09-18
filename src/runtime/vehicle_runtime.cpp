@@ -62,9 +62,56 @@ RuntimeOutput VehicleRuntime::step(double now, double dt){
       output_.state=domain::RuntimeState::kStopped;
     }
   } else if(active){
+    // Only scenarios that explicitly define an ordered load/dump/parking
+    // sequence are staged missions.  Ordinary ring or point-to-point missions
+    // keep the default zero indices and must not enter LOAD at startup.
+    const bool staged_mission = mission->load_index < mission->dump_index &&
+                                mission->dump_index < mission->parking_index &&
+                                mission->parking_index < mission->route.size();
+    const std::size_t stage_target_index =
+        mission->stage == domain::MissionStage::kTransit ? mission->load_index :
+        mission->stage == domain::MissionStage::kHaul ? mission->dump_index :
+        mission->stage == domain::MissionStage::kReturn ? mission->parking_index :
+        mission->route.size() - 1;
+    const auto& stage_target = mission->route[stage_target_index];
+    const double stage_distance = std::hypot(vehicle_.pose.x - stage_target.x,
+                                             vehicle_.pose.y - stage_target.y);
+    if (staged_mission && mission->stage == domain::MissionStage::kTransit &&
+        stage_distance <= mission->goal_tolerance) {
+      missions_.setStage(domain::MissionStage::kLoad, domain::PayloadState::kEmpty, now);
+      output_.planning = {};
+    } else if (staged_mission && mission->stage == domain::MissionStage::kLoad) {
+      desired.brake = 1.0;
+      if (now - mission->stage_started_at_s >= mission->work_hold_s)
+        missions_.setStage(domain::MissionStage::kHaul, domain::PayloadState::kLoaded, now);
+      output_.planning = {};
+    } else if (staged_mission && mission->stage == domain::MissionStage::kHaul &&
+               stage_distance <= mission->goal_tolerance) {
+      missions_.setStage(domain::MissionStage::kDump, domain::PayloadState::kLoaded, now);
+      desired.brake = 1.0;
+      output_.planning = {};
+    } else if (staged_mission && mission->stage == domain::MissionStage::kDump) {
+      desired.brake = 1.0;
+      if (now - mission->stage_started_at_s >= mission->work_hold_s)
+        missions_.setStage(domain::MissionStage::kReturn, domain::PayloadState::kEmpty, now);
+      output_.planning = {};
+    } else if (staged_mission && mission->stage == domain::MissionStage::kReturn &&
+               stage_distance <= mission->goal_tolerance) {
+      missions_.succeed("parking_area_reached");
+      controller_->reset();
+      active = false;
+      output_.planning = {};
+      output_.state = domain::RuntimeState::kStopped;
+    } else {
     behavior::BehaviorInput behavior_input{vehicle_, *mission, obstacles_};
     output_.behavior=behavior_manager_->decide(behavior_input);
     planning::PlanningInput in; in.vehicle=vehicle_; in.reference_path=mission->route;
+    if (staged_mission) {
+      std::size_t begin = mission->stage == domain::MissionStage::kHaul ? mission->load_index :
+                          mission->stage == domain::MissionStage::kReturn ? mission->dump_index : 0;
+      in.reference_path.assign(mission->route.begin() + begin,
+                               mission->route.begin() + stage_target_index + 1);
+    }
     if(mission->type==domain::MissionType::kNavigateTo && in.reference_path.size()==1)
       in.reference_path.insert(in.reference_path.begin(),vehicle_.pose);
     in.obstacles=obstacles_; in.speed_limit=std::min(mission->speed_limit,output_.behavior.speed_limit); in.now_s=now; output_.planning=planner_->plan(in);
@@ -77,7 +124,7 @@ RuntimeOutput VehicleRuntime::step(double now, double dt){
       desired=controller_->compute(controller_input);
       if(output_.behavior.stop_required){ desired.target_speed=0.0; desired.brake=1.0; }
     }
-    if(!mission->route.empty()) {
+    if(!staged_mission && !mission->route.empty()) {
       std::size_t nearest=0; double nearest_distance=std::numeric_limits<double>::max();
       for(std::size_t i=0;i<mission->route.size();++i) {
         const double distance=std::hypot(vehicle_.pose.x-mission->route[i].x,vehicle_.pose.y-mission->route[i].y);
@@ -87,9 +134,16 @@ RuntimeOutput VehicleRuntime::step(double now, double dt){
       const auto& goal=mission->route.back();
       const double goal_distance=std::hypot(vehicle_.pose.x-goal.x,vehicle_.pose.y-goal.y);
       const bool closed=mission->route.size()>2 && std::hypot(mission->route.front().x-goal.x,mission->route.front().y-goal.y)<mission->goal_tolerance;
-      if((mission->type==domain::MissionType::kNavigateTo || !closed) && goal_distance<=mission->goal_tolerance) {
+      if((mission->type==domain::MissionType::kFollowRoute &&
+          mission->stage == domain::MissionStage::kHaul && !closed &&
+          goal_distance <= mission->goal_tolerance)) {
+        missions_.setStage(domain::MissionStage::kDump, domain::PayloadState::kLoaded);
+        desired.target_speed = 0.0;
+        desired.brake = 1.0;
+      } else if((mission->type==domain::MissionType::kNavigateTo || !closed) && goal_distance<=mission->goal_tolerance) {
         missions_.succeed("goal_reached"); controller_->reset(); desired={}; active=false; output_.state=domain::RuntimeState::kStopped;
       }
+    }
     }
   } else { output_.planning={}; }
   const bool vehicle_ok=std::isfinite(vehicle_.pose.x) && std::isfinite(vehicle_.pose.y) && std::isfinite(vehicle_.pose.yaw) && std::isfinite(vehicle_.velocity.linear);

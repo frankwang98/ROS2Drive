@@ -19,6 +19,8 @@ class MissionManager {
   bool succeed(const std::string& reason = "completed");
   bool fail(const std::string& reason);
   void updateProgress(double progress);
+  bool setStage(domain::MissionStage stage, domain::PayloadState payload,
+                double now_s = 0.0);
   bool timedOut(double now_s) const;
   bool busy() const;
   const std::string& lastError() const { return last_error_; }

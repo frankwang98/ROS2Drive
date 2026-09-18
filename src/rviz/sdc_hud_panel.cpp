@@ -105,7 +105,7 @@ void HudPanel::onInitialize() {
   if (auto* view_manager = getDisplayContext()->getViewManager()) {
     if (auto* render_panel = view_manager->getRenderPanel()) {
       viewport_hud_ = new QFrame(render_panel);
-      viewport_hud_->setGeometry(14, 14, 210, 92);
+      viewport_hud_->setGeometry(14, 14, 230, 116);
       viewport_hud_->setStyleSheet(
           "QFrame { background: rgba(18, 24, 32, 215); border: 1px solid #49b6ff;"
           " border-radius: 10px; } QLabel { color: #eaf6ff; background: transparent; }");
@@ -116,9 +116,12 @@ void HudPanel::onInitialize() {
       viewport_title_->setStyleSheet("color: #66d9ff; font-weight: 700; letter-spacing: 1px;");
       viewport_speed_ = new QLabel("SPEED  -- m/s", viewport_hud_);
       viewport_pose_ = new QLabel("POS    --  --  --", viewport_hud_);
+      viewport_stage_ = new QLabel("STAGE  TRANSIT", viewport_hud_);
+      viewport_stage_->setStyleSheet("color: #ffd166; font-weight: 700;");
       layout->addWidget(viewport_title_);
       layout->addWidget(viewport_speed_);
       layout->addWidget(viewport_pose_);
+      layout->addWidget(viewport_stage_);
       viewport_hud_->raise();
       viewport_hud_->show();
     }
@@ -133,10 +136,13 @@ void HudPanel::onInitialize() {
       "sdc/front_distance", qos, std::bind(&HudPanel::onDistance, this, std::placeholders::_1));
   auto odom_qos = rclcpp::SensorDataQoS().keep_last(5);
   odom_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
-      "localization/odometry", odom_qos,
+      "sdc/odometry", odom_qos,
       std::bind(&HudPanel::onOdometry, this, std::placeholders::_1));
   mode_sub_ = node_->create_subscription<std_msgs::msg::Int32>(
       "sdc/mode", qos, std::bind(&HudPanel::onMode, this, std::placeholders::_1));
+  mission_stage_sub_ = node_->create_subscription<std_msgs::msg::String>(
+      "sdc/mission_stage", qos,
+      std::bind(&HudPanel::onMissionStage, this, std::placeholders::_1));
 
   start_pub_ = node_->create_publisher<std_msgs::msg::Bool>("sdc/start", qos);
   pause_pub_ = node_->create_publisher<std_msgs::msg::Bool>("sdc/pause", qos);
@@ -178,6 +184,12 @@ void HudPanel::onMode(const std_msgs::msg::Int32::SharedPtr msg) {
   }
 }
 
+void HudPanel::onMissionStage(const std_msgs::msg::String::SharedPtr msg) {
+  mission_stage_ = msg->data.empty() ? "UNKNOWN" : msg->data;
+  if (viewport_stage_)
+    viewport_stage_->setText(QString("STAGE  %1").arg(QString::fromStdString(mission_stage_)));
+}
+
 void HudPanel::onStatusTimer() {
   if (speed_label_)  speed_label_->setText(QString("速度: %1 m/s").arg(speed_, 0, 'f', 1));
   if (action_label_) {
@@ -193,6 +205,8 @@ void HudPanel::onStatusTimer() {
                                 .arg(pose_y_, 0, 'f', 1)
                                 .arg(pose_z_, 0, 'f', 1));
   }
+  if (viewport_stage_)
+    viewport_stage_->setText(QString("STAGE  %1").arg(QString::fromStdString(mission_stage_)));
   if (pause_button_) pause_button_->setText(paused_ ? "继续" : "暂停");
 
   // 手动模式下持续发送指令（保证松开后自动回中）

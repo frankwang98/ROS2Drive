@@ -57,6 +57,7 @@
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/float64.hpp>
 #include <std_msgs/msg/int32.hpp>
+#include <std_msgs/msg/string.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 #include "self_driving_car_demo/msg/control_command.hpp"
@@ -128,6 +129,16 @@ static domain::FaultAction fault_action_from_string(const std::string& value) {
   if (value == "stop") return domain::FaultAction::kStop;
   if (value == "estop") return domain::FaultAction::kEmergencyStop;
   throw std::invalid_argument("unknown safety policy action: " + value);
+}
+
+static const char* mission_stage_name(domain::MissionStage stage) {
+  switch (stage) {
+    case domain::MissionStage::kLoad: return "LOAD";
+    case domain::MissionStage::kHaul: return "HAUL";
+    case domain::MissionStage::kDump: return "DUMP";
+    case domain::MissionStage::kReturn: return "RETURN";
+    default: return "TRANSIT";
+  }
 }
 
 
@@ -300,6 +311,7 @@ public:
     odometry_pub_ = create_publisher<nav_msgs::msg::Odometry>("sdc/odometry", sensor_qos);
     runtime_state_pub_ = create_publisher<std_msgs::msg::Int32>("sdc/runtime_state", live_qos);
     fault_count_pub_ = create_publisher<std_msgs::msg::Int32>("sdc/fault_count", live_qos);
+    mission_stage_pub_ = create_publisher<std_msgs::msg::String>("sdc/mission_stage", status_qos);
     mission_state_pub_ = create_publisher<std_msgs::msg::Int32>("sdc/mission_state", live_qos);
     mission_progress_pub_ = create_publisher<std_msgs::msg::Float64>("sdc/mission_progress", live_qos);
     trajectory_pub_ = create_publisher<self_driving_car_demo::msg::Trajectory>("planning/trajectory", live_qos);
@@ -486,6 +498,7 @@ private:
     paused_ = false;
     road_markers_ = map_->build_road_markers();
     extra_markers_ = map_->build_extra_markers();
+    add_mission_zone_markers();
     publish_road_markers();
     RCLCPP_INFO(get_logger(), "Scenario loaded: %s", scenario_definition_.id.c_str());
   }
@@ -560,8 +573,13 @@ private:
                                          0.8, false});
           }
         }
-        for (const auto& ob : obstacle_manager_.obstacles())
-          runtime_obstacles.push_back({"dynamic-" + std::to_string(obstacle_id++), {ob.x, ob.y, 0.0}, ob.radius, true});
+        // The obstacle manager belongs to the ring-road benchmark.  Do not
+        // leak its generated objects into the obstacle-free mining baseline.
+        if (scenario_definition_.id == "ring_demo") {
+          for (const auto& ob : obstacle_manager_.obstacles())
+            runtime_obstacles.push_back({"dynamic-" + std::to_string(obstacle_id++),
+                                         {ob.x, ob.y, 0.0}, ob.radius, true});
+        }
         simulation_.setObstacles(std::move(runtime_obstacles));
         const auto output = simulation_.step(sim_dt_);
         if (auto_recover_safety_ && simulation_.runtime().safetyRecoveryReady())
@@ -572,6 +590,12 @@ private:
         last_front_dist_ = driver_front_dist();
         last_action_ = output.control.target_speed < 0.05 ? Action::kStop :
                        output.control.target_speed < 1.0 ? Action::kBrake : Action::kCruise;
+        if (simulation_.runtime().missions().current()) {
+          std_msgs::msg::String stage_message;
+          stage_message.data = mission_stage_name(
+              simulation_.runtime().missions().current()->stage);
+          mission_stage_pub_->publish(stage_message);
+        }
       }
 
       // 记录轨迹
@@ -583,8 +607,10 @@ private:
 
       if (sim_time_ + 1e-9 >= next_status_log_s_) {
         RCLCPP_INFO(get_logger(),
-                    "[%.1fs] mode=%-10s speed=%.2f m/s front=%.2f m action=%-10s plan=%s safety=%d reason=%s",
+                    "[%.1fs] mode=%-10s stage=%-7s speed=%.2f m/s front=%.2f m action=%-10s plan=%s safety=%d reason=%s",
                     sim_time_, mode_ == Mode::kManual ? "MANUAL" : "AUTONOMOUS",
+                    simulation_.runtime().missions().current()
+                        ? mission_stage_name(simulation_.runtime().missions().current()->stage) : "NONE",
                     simulation_.vehicle().speed(), last_front_dist_, action_name(last_action_),
                     last_planning_success_ ? "OK" : "FAILED", last_safety_action_,
                     last_planning_reason_.c_str());
@@ -724,18 +750,21 @@ private:
   void publish_obstacles_marker() {
     visualization_msgs::msg::MarkerArray ma;
     int id = 0;
-    // 动态障碍（橙色方块）
-    for (const auto& ob : obstacle_manager_.obstacles()) {
-      visualization_msgs::msg::Marker m;
-      m.header.frame_id = world_frame_; m.header.stamp = now();
-      m.ns = "obstacles"; m.id = id++;
-      m.type = visualization_msgs::msg::Marker::CUBE; m.action = m.ADD;
-      m.pose.position.x = ob.x; m.pose.position.y = ob.y; m.pose.position.z = 0.5;
-      m.pose.orientation.w = 1.0;
-      double sz = 2.0 * ob.radius;
-      m.scale.x = sz; m.scale.y = sz; m.scale.z = 1.0;
-      m.color.r = 0.95f; m.color.g = 0.25f; m.color.b = 0.1f; m.color.a = 0.95f;
-      ma.markers.push_back(m);
+    // Dynamic obstacles are part of the ring benchmark only.  Keep the
+    // mining baseline visually and semantically obstacle-free.
+    if (scenario_definition_.id == "ring_demo") {
+      for (const auto& ob : obstacle_manager_.obstacles()) {
+        visualization_msgs::msg::Marker m;
+        m.header.frame_id = world_frame_; m.header.stamp = now();
+        m.ns = "obstacles"; m.id = id++;
+        m.type = visualization_msgs::msg::Marker::CUBE; m.action = m.ADD;
+        m.pose.position.x = ob.x; m.pose.position.y = ob.y; m.pose.position.z = 0.5;
+        m.pose.orientation.w = 1.0;
+        double sz = 2.0 * ob.radius;
+        m.scale.x = sz; m.scale.y = sz; m.scale.z = 1.0;
+        m.color.r = 0.95f; m.color.g = 0.25f; m.color.b = 0.1f; m.color.a = 0.95f;
+        ma.markers.push_back(m);
+      }
     }
     if (scenario_definition_.id == "ring_demo" && fixed_ring_obstacles_) {
       constexpr double ring_radius = 24.5;
@@ -875,9 +904,12 @@ private:
       m.color.r = 0.85f; m.color.g = 0.95f; m.color.b = 1.0f; m.color.a = 1.0f;
       char buf[200];
       const double vehicle_z = scenario_height_at(cx, cy);
+      const char* stage = simulation_.runtime().missions().current()
+                              ? mission_stage_name(simulation_.runtime().missions().current()->stage)
+                              : "NONE";
       std::snprintf(buf, sizeof(buf),
-                    "POS  %.1f  %.1f  %.1f\nSPD  %.1f m/s",
-                    cx, cy, vehicle_z, simulation_.vehicle().speed());
+                    "STAGE  %s\nPOS  %.1f  %.1f  %.1f\nSPD  %.1f m/s",
+                    stage, cx, cy, vehicle_z, simulation_.vehicle().speed());
       m.text = buf;
       ma.markers.push_back(m);
     }
@@ -885,6 +917,44 @@ private:
   }
 
   // ========== 静态道路重发 ==========
+  void add_mission_zone_markers() {
+    if (scenario_definition_.id != "mining_haul" ||
+        scenario_definition_.reference_route.size() < 6) return;
+    const auto add_zone = [this](const char* ns, int id, std::size_t route_index,
+                                 const char* label, float r, float g, float b) {
+      const auto& p = scenario_definition_.reference_route[route_index];
+      visualization_msgs::msg::Marker zone;
+      zone.header.frame_id = world_frame_;
+      zone.ns = ns; zone.id = id;
+      zone.type = visualization_msgs::msg::Marker::CYLINDER;
+      zone.action = visualization_msgs::msg::Marker::ADD;
+      zone.pose.position.x = p.x; zone.pose.position.y = p.y;
+      zone.pose.position.z = scenario_height_at(p.x, p.y) + 0.05;
+      zone.pose.orientation.w = 1.0;
+      zone.scale.x = 4.0; zone.scale.y = 4.0; zone.scale.z = 0.08;
+      zone.color.r = r; zone.color.g = g; zone.color.b = b; zone.color.a = 0.42f;
+      extra_markers_.markers.push_back(zone);
+
+      visualization_msgs::msg::Marker text;
+      text.header.frame_id = world_frame_;
+      text.ns = ns; text.id = id + 100;
+      text.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+      text.action = visualization_msgs::msg::Marker::ADD;
+      text.pose.position.x = p.x; text.pose.position.y = p.y;
+      text.pose.position.z = scenario_height_at(p.x, p.y) + 1.8;
+      text.scale.z = 0.8;
+      text.color.r = r; text.color.g = g; text.color.b = b; text.color.a = 1.0f;
+      text.text = label;
+      extra_markers_.markers.push_back(text);
+    };
+    add_zone("mission_load", 10, scenario_definition_.default_mission.load_index,
+             "LOAD", 0.1f, 0.9f, 0.35f);
+    add_zone("mission_dump", 20, scenario_definition_.default_mission.dump_index,
+             "DUMP", 1.0f, 0.55f, 0.1f);
+    add_zone("mission_parking", 30, scenario_definition_.default_mission.parking_index,
+             "PARK", 0.25f, 0.65f, 1.0f);
+  }
+
   void publish_road_markers() {
     for (auto& mk : road_markers_.markers) {
       mk.header.frame_id = world_frame_;
@@ -962,6 +1032,7 @@ private:
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odometry_pub_;
   rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr runtime_state_pub_;
   rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr fault_count_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr mission_stage_pub_;
   rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr mission_state_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr mission_progress_pub_;
   rclcpp::Publisher<self_driving_car_demo::msg::Trajectory>::SharedPtr trajectory_pub_;

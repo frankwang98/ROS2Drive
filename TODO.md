@@ -64,6 +64,13 @@
 - [~] 环形场景已切换为 `RingLanePlanner`：KEEP_LEFT/CHANGE_RIGHT/KEEP_RIGHT/CHANGE_LEFT 状态与连续 Frenet 变道轨迹；待用户编译验证和补齐目标车道占用/连续障碍测试
 - [x] RingLanePlanner 对膨胀障碍物执行硬碰撞否决；无无碰撞轨迹时返回 planning failure，由 SafetyManager 停车
 - [ ] 矿区业务闭环：`LOAD → 装载确认 → HAUL → DUMP → 卸载确认 → RETURN/结束`，增加载荷状态、装卸点停靠和任务事件
+- [x] 已实现矿区 `TRANSIT → LOAD(3s) → HAUL → DUMP(3s) → RETURN → PARK` 阶段与 `PayloadState`；阶段通过日志、`sdc/mission_stage` 和 RViz HUD 发布
+- [x] 矿区语义路线增加 LOAD/DUMP/PARK 固定标记；当前基线暂不放置障碍物，先隔离路线跟踪和装卸流程
+- [x] 删除矿区旧的首点 LOAD/末点 DUMP 通用标记，重画带过渡 waypoint 的平滑运输路线
+- [x] 通用局部避障改为连续锥形横向偏移，避免逐 waypoint 偏移造成的矩形回环和突然折返
+- [x] 避障触发增加横向车道走廊判定：仅路侧不侵入车道的障碍物不再触发变道
+- [x] 修正局部窗口边缘避障 taper，以最近点为峰值中心，避免矿区轨迹出现尖角
+- [x] 修复普通环形/点到点任务误用装卸阶段索引，只有显式 `load < dump < parking` 才启用 staged mission
 - [ ] 实现 `port_transport` 最小场景：堆场→路口→岸桥交接点，支持路权/停车线和精准停靠任务
 - [ ] 实现 `agriculture_route` 最小场景：作业行路线、地头转弯和作业机具状态，保持人员/作物安全边界
 - [ ] 港口扩展：堆场/闸口/岸桥/充电位、交叉口路权、倒车/精准对接、作业区限速

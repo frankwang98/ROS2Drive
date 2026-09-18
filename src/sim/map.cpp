@@ -362,6 +362,9 @@ MarkerArray DefinitionScenarioMap::build_road_markers() const {
 
 MarkerArray DefinitionScenarioMap::build_extra_markers() const {
   MarkerArray markers;
+  // Mining owns explicit LOAD/DUMP/PARK markers in the ROS visualization
+  // adapter.  Do not add the legacy generic first/last-route labels here.
+  if (definition_.id == "mining_haul") return markers;
   const char* labels[] = {"LOAD", "DUMP"};
   const std::size_t indices[] = {0, definition_.reference_route.size() - 1};
   for (int i = 0; i < 2; ++i) {

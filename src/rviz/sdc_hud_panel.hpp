@@ -30,6 +30,7 @@
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/float64.hpp>
 #include <std_msgs/msg/int32.hpp>
+#include <std_msgs/msg/string.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 
@@ -64,6 +65,7 @@ class HudPanel : public rviz_common::Panel {
   void onDistance(const std_msgs::msg::Float64::SharedPtr msg);
   void onMode(const std_msgs::msg::Int32::SharedPtr msg);
   void onOdometry(const nav_msgs::msg::Odometry::SharedPtr msg);
+  void onMissionStage(const std_msgs::msg::String::SharedPtr msg);
 
   /// 发送当前手动指令（WASD 键位组合）。
   void publishManualCmd();
@@ -79,6 +81,7 @@ class HudPanel : public rviz_common::Panel {
   QLabel* viewport_title_{nullptr};
   QLabel* viewport_speed_{nullptr};
   QLabel* viewport_pose_{nullptr};
+  QLabel* viewport_stage_{nullptr};
 
   // ---- 控制按钮 ----
   QPushButton* start_button_;
@@ -97,6 +100,7 @@ class HudPanel : public rviz_common::Panel {
   rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr distance_sub_;
   rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr mode_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr mission_stage_sub_;
 
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr start_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pause_pub_;
@@ -114,6 +118,7 @@ class HudPanel : public rviz_common::Panel {
   double pose_y_{0.0};
   double pose_z_{0.0};
   int    action_id_{0};
+  std::string mission_stage_{"TRANSIT"};
 
   // WASD 键位状态
   bool key_w_{false};  // 前进

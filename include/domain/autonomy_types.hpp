@@ -52,6 +52,8 @@ struct ControlCommand {
 enum class RuntimeState { kInit, kReady, kRunning, kPaused, kDegraded, kStopped, kFault, kEstop };
 enum class MissionType { kNavigateTo, kFollowRoute, kStop, kPark, kDock, kReturnHome };
 enum class MissionState { kPending, kActive, kPaused, kSucceeded, kFailed, kCanceled };
+enum class MissionStage { kTransit, kLoad, kHaul, kDump, kReturn };
+enum class PayloadState { kUnknown, kEmpty, kLoaded };
 
 struct Mission {
   std::string id;
@@ -65,6 +67,13 @@ struct Mission {
   double started_at_s{0.0};
   double progress{0.0};
   std::string result_reason;
+  MissionStage stage{MissionStage::kTransit};
+  PayloadState payload{PayloadState::kUnknown};
+  std::size_t load_index{0};
+  std::size_t dump_index{0};
+  std::size_t parking_index{0};
+  double stage_started_at_s{0.0};
+  double work_hold_s{3.0};
 };
 
 enum class FaultSeverity { kInfo, kWarning, kError, kFatal };

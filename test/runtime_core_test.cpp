@@ -48,7 +48,7 @@ TEST(ScenarioDefinition, MiningHaulChangesRouteObstaclesAndProfile) {
   EXPECT_GE(definition.reference_route.size(), 5u);
   EXPECT_FALSE(definition.static_obstacles.empty());
   EXPECT_LT(definition.vehicle_constraints.maximum_speed, 2.0);
-  EXPECT_NEAR(definition.initial_pose.x, -32.0, 1e-9);
+  EXPECT_NEAR(definition.initial_pose.x, -42.0, 1e-9);
   EXPECT_GT(definition.reference_route.back().z, definition.reference_route.front().z);
   EXPECT_NE(definition.reference_route.front().x, definition.reference_route.back().x);
 }
