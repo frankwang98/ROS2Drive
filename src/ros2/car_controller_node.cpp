@@ -27,7 +27,7 @@ public:
         std::chrono::milliseconds(50),
         std::bind(&CarControllerNode::control_step, this));
 
-    RCLCPP_INFO(get_logger(), "小车控制器就绪");
+    RCLCPP_INFO(get_logger(), "Vehicle controller ready");
   }
 
 private:

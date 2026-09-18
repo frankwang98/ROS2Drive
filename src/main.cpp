@@ -11,13 +11,13 @@ constexpr int kSteps = 100;           // 模拟步数
 constexpr double kCruiseTarget = 2.0; // 期望巡航速度（m/s）
 
 void print_header() {
-  std::printf("========== 自动驾驶小车 Demo ==========\n");
-  std::printf("感知 -> 决策 -> 控制  |  时间步长 %.1fs, 共 %d 步\n\n",
+  std::printf("========== Autonomous Vehicle Demo ==========\n");
+  std::printf("Perception -> Decision -> Control | time step %.1fs, %d steps\n\n",
               kDt, kSteps);
 }
 
 void print_state(const sdc::Car& car, int step) {
-  std::printf("[%3d] 障碍物: %5.2f m | 行为: %-6s | 速度: %4.2f m/s | 行驶: %6.2f m\n",
+  std::printf("[%3d] obstacle: %5.2f m | action: %-10s | speed: %4.2f m/s | distance: %6.2f m\n",
               step,
               car.front_distance(),
               sdc::action_name(car.current_action()),
@@ -38,8 +38,8 @@ int main() {
     print_state(car, i);
   }
 
-  std::printf("\n========== 模拟结束 ==========\n");
-  std::printf("总行驶距离: %.2f m | 最终速度: %.2f m/s\n",
+  std::printf("\n========== Simulation Complete ==========\n");
+  std::printf("total distance: %.2f m | final speed: %.2f m/s\n",
               car.distance_traveled(), car.speed());
   return 0;
 }

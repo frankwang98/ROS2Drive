@@ -17,6 +17,7 @@ class RuntimeRecorder {
   void record(ReplayFrame frame);
   void clear() { frames_.clear(); }
   const std::vector<ReplayFrame>& frames() const { return frames_; }
+  // Saves SDC_REPLAY_V2 (with elevation); load also accepts V1 recordings.
   bool save(const std::string& path) const;
   bool load(const std::string& path);
  private:

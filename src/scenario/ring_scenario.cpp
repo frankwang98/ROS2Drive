@@ -11,18 +11,27 @@ ScenarioDefinition makeRingScenarioDefinition(double radius, int segments) {
 
   ScenarioDefinition definition;
   definition.id = "ring_demo";
-  definition.initial_pose = {radius, 0.0, M_PI_2};
+  // CCW traffic keeps left of the double center line: inward lane radius.
+  const double lane_offset = 1.5;
+  const double route_radius = radius - lane_offset;
+  definition.initial_pose = {route_radius, 0.0, M_PI_2};
   definition.reference_route.reserve(static_cast<std::size_t>(segments) + 1);
   for (int i = 0; i <= segments; ++i) {
     const double angle = 2.0 * M_PI * i / segments;
     definition.reference_route.push_back(
-        {radius * std::cos(angle), radius * std::sin(angle), angle + M_PI_2});
+        {route_radius * std::cos(angle), route_radius * std::sin(angle), angle + M_PI_2});
   }
   definition.default_mission.id = "ring-demo";
   definition.default_mission.type = domain::MissionType::kFollowRoute;
   definition.default_mission.route = definition.reference_route;
   definition.default_mission.speed_limit =
       definition.vehicle_constraints.maximum_speed;
+  // Deterministic benchmark obstacles.  Their positions are fixed so planner
+  // and controller comparisons are repeatable across runs.
+  definition.static_obstacles = {
+      {"ring-benchmark-lane-1", {route_radius * std::cos(0.85), route_radius * std::sin(0.85), 0.0}, 0.8, false},
+      {"ring-benchmark-lane-2", {route_radius * std::cos(3.00), route_radius * std::sin(3.00), 0.0}, 0.8, false},
+      {"ring-benchmark-lane-3", {route_radius * std::cos(5.15), route_radius * std::sin(5.15), 0.0}, 0.8, false}};
   definition.default_behavior_profile = "RingDemo";
   return definition;
 }

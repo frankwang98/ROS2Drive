@@ -34,6 +34,10 @@ route, default FollowRoute mission, vehicle constraints and default `RingDemo` p
 RViz markers and ring static-obstacle construction remain in `RingMap` until the adapter
 migration is completed.
 
+`mining_haul` is currently a non-closed LOAD-to-DUMP route and carries an elevation profile. This is a visualization/trajectory layer
+only: the vehicle dynamics remain planar, so it does not yet model pitch, grade resistance,
+or load-dependent uphill acceleration.
+
 ## Failure scenarios
 
 1. Localization loss: set `FaultInjection.localization_available=false`; expect `FAULT`, zero speed and full brake.

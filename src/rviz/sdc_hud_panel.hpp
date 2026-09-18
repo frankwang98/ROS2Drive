@@ -23,6 +23,7 @@
 #include <QComboBox>
 #include <QTimer>
 #include <QKeyEvent>
+#include <QFrame>
 
 #include <rclcpp/rclcpp.hpp>
 #include <rviz_common/panel.hpp>
@@ -30,6 +31,7 @@
 #include <std_msgs/msg/float64.hpp>
 #include <std_msgs/msg/int32.hpp>
 #include <geometry_msgs/msg/twist.hpp>
+#include <nav_msgs/msg/odometry.hpp>
 
 namespace sdc {
 
@@ -61,6 +63,7 @@ class HudPanel : public rviz_common::Panel {
   void onAction(const std_msgs::msg::Float64::SharedPtr msg);
   void onDistance(const std_msgs::msg::Float64::SharedPtr msg);
   void onMode(const std_msgs::msg::Int32::SharedPtr msg);
+  void onOdometry(const nav_msgs::msg::Odometry::SharedPtr msg);
 
   /// 发送当前手动指令（WASD 键位组合）。
   void publishManualCmd();
@@ -72,6 +75,10 @@ class HudPanel : public rviz_common::Panel {
   QLabel* action_label_;
   QLabel* distance_label_;
   QLabel* mode_label_;
+  QFrame* viewport_hud_{nullptr};
+  QLabel* viewport_title_{nullptr};
+  QLabel* viewport_speed_{nullptr};
+  QLabel* viewport_pose_{nullptr};
 
   // ---- 控制按钮 ----
   QPushButton* start_button_;
@@ -89,6 +96,7 @@ class HudPanel : public rviz_common::Panel {
   rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr action_sub_;
   rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr distance_sub_;
   rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr mode_sub_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
 
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr start_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pause_pub_;
@@ -102,6 +110,9 @@ class HudPanel : public rviz_common::Panel {
   bool   manual_{false};        // 当前是否为手动模式
   double speed_{0.0};
   double distance_{0.0};
+  double pose_x_{0.0};
+  double pose_y_{0.0};
+  double pose_z_{0.0};
   int    action_id_{0};
 
   // WASD 键位状态

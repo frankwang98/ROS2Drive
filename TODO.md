@@ -57,11 +57,20 @@
 - [~] 已建立 ROS-free `ScenarioDefinition` 及合同校验，统一初始位姿、参考路线、静态障碍、默认 Mission、车辆约束与 Behavior Profile；文件 `ScenarioLoader` 待场景资产格式确定后实现
 - [x] 已将 `scenario` 与 `behavior_profile` 分离参数化；`auto` 选场景默认 Profile，也允许显式交叉组合
 - [~] 已实现 ROS-free `RingScenarioDefinition`，默认位姿/路线/Mission 已从 ROS 节点迁出并由环形 adapter 消费；地图 Marker 与静态障碍仍在 `RingMap`
-- [~] 已实现 `mining_haul` 最小可运行场景：独立起点、闭合运输路线、LOAD/DUMP 可视化、确定性路侧障碍、低速 Mission 与 MiningHaul Profile；重载/空载状态切换待实现
+- [~] 已实现 `mining_haul` 最小可运行场景：LOAD→DUMP 非闭合高程运输路线、LOAD/DUMP 可视化、确定性路侧障碍、低速 Mission 与 MiningHaul Profile；返回、重载/空载状态切换待实现
+- [ ] 环形基准验收：无障碍稳定跟踪、单障碍绕行、连续障碍、规划失败停车、闭环任务五项均通过
+- [x] 环形基准改为双车道（总宽 6 m），固定中心线障碍物用于可重复验证变道/绕障，支持 `simulation.fixed_ring_obstacles` 开关
+- [x] 环形默认障碍物改为随机模式，障碍物状态每 3 秒更新；固定模式仅用于回归测试
+- [~] 环形场景已切换为 `RingLanePlanner`：KEEP_LEFT/CHANGE_RIGHT/KEEP_RIGHT/CHANGE_LEFT 状态与连续 Frenet 变道轨迹；待用户编译验证和补齐目标车道占用/连续障碍测试
+- [x] RingLanePlanner 对膨胀障碍物执行硬碰撞否决；无无碰撞轨迹时返回 planning failure，由 SafetyManager 停车
+- [ ] 矿区业务闭环：`LOAD → 装载确认 → HAUL → DUMP → 卸载确认 → RETURN/结束`，增加载荷状态、装卸点停靠和任务事件
 - [ ] 实现 `port_transport` 最小场景：堆场→路口→岸桥交接点，支持路权/停车线和精准停靠任务
 - [ ] 实现 `agriculture_route` 最小场景：作业行路线、地头转弯和作业机具状态，保持人员/作物安全边界
+- [ ] 港口扩展：堆场/闸口/岸桥/充电位、交叉口路权、倒车/精准对接、作业区限速
+- [ ] 农业扩展：作业行生成、地头 U 型/回字转弯、机具状态、行间偏差和人员/牲畜安全区
 - [ ] 为装卸、会车/路权、精准停靠、作业行/地头转弯增加可复用 BT 业务子树，而非把场景逻辑写入 Runtime
 - [~] `ring_demo` / `mining_haul` 已可通过同一 launch 的 `scenario` 参数一键切换，矿区已有确定性路线/障碍；独立 YAML 资产及其他场景待实现
+- [~] `ring_demo` / `mining_haul` 已可通过同一 launch 的 `scenario` 参数一键切换，矿区已有高程路线、确定性障碍和三维 RViz/轨迹显示；独立 YAML 资产及其他场景待实现
 - [ ] 增加场景合同测试：路线有效、初始位姿可行、Behavior Profile 可加载、Mission 可达成、故障仍由 Safety 最终仲裁
 
 验收：`scenario:=ring_demo|mining_haul|port_transport|agriculture_route` 会真正改变地图、路线、任务和环境；`behavior_profile` 只改变行为/安全策略。四个场景共用同一 `VehicleRuntime`、`Trajectory`、`VehicleInterface` 和 ROS 合同。
@@ -79,3 +88,36 @@
 - 不引入 Kafka、Service Mesh 或车端微服务化。
 - 不让云端直接设置 controller/planner 作为正式任务接口。
 - 不用软件 Safety 替代底盘硬件安全链路。
+- [ ] 将现有 Lattice/EM/Stanley/LQR/MPC 通过统一 adapter 接入 `VehicleRuntime`，提供 `planner.type` / `controller.type` 参数；当前它们仍属于旧 AutoDriver 链路
+
+## 下一阶段总原则
+
+先完成一条可复用、可验证的自动驾驶闭环，而不是同时堆四个 Demo：
+
+```text
+场景路线 → Mission → Behavior → Planner → dense Trajectory
+→ Velocity Planner → Controller → Safety → VehicleInterface
+```
+
+环形道路验证 VehicleRuntime 基础闭环；矿区验证 `LOAD→DUMP` 装运流程；农业验证
+作业行与地头转弯；港口验证路权、精准停靠和交接作业。场景只提供路线、作业点、
+约束和业务 BT，不复制 Runtime、规划器或控制器。
+
+## M0 — 目录与边界收敛
+
+- [ ] 将 `src/ros/` 明确为 `ros_adapter/`（保留兼容路径），避免与 `src/ros2/` 造成两套 ROS 层的误解
+- [ ] 将 `ring_road_sim_node` 拆为 Runtime Node、Visualization Adapter、Sensor Adapter
+- [ ] 将仍带环道假设的 legacy 代码标记并隔离，禁止新 Runtime 直接依赖
+- [ ] 统一只从 `autonomy.launch.py` 启动，清理文档中的 `ring_road` 领域命名
+
+## M7 — 自动驾驶必备能力补齐
+
+- [ ] 定位：Odometry、frame/时间戳校验、定位丢失降级和恢复
+- [ ] 感知：障碍物集合、动态障碍速度/预测、传感器 freshness
+- [ ] 地图与路线：参考路径、局部路径、作业行语义、速度区和禁行区
+- [ ] 规划：全局路线、局部避障、轨迹平滑、曲率约束、可行性检查和失败原因
+- [ ] 控制：横向跟踪、纵向速度、转角/转角速度限幅、倒车和停车控制
+- [ ] 车辆模型：Ackermann 运动学、速度/加减速约束、真实底盘反馈接口
+- [ ] 任务行为：装卸、停靠、会车、路权、地头转弯等业务动作
+- [ ] 安全：急停、看门狗、碰撞约束、速度上限、故障锁存、恢复确认和硬件急停接口
+- [ ] 测试：算法单测、契约测试、场景测试、故障注入、E2E 和确定性回放

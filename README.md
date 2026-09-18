@@ -35,7 +35,7 @@ Mission / Route / Vehicle State / Obstacles
 - `safety/`：检测超时、定位、规划、急停等故障，并覆盖不安全指令。
 - `behavior_tree/`：矿山、港口、农业、教学场景通过外部 XML 配置。
 - `ros2/`：唯一 ROS 边界；`sim/`：场景、传感器和车辆模型适配器。
-- `ros/`：独立 Domain→ROS typed message converter，避免 Runtime 和仿真节点手写协议映射。
+- `ros/`：独立 Domain→ROS typed message converter；`ros2/`：ROS 2 Node、Action、参数和发布订阅边界。两者不是两套 ROS 实现：前者是纯转换库，后者是唯一运行时 ROS 入口。
 - `simulation/`：ROS-free 教学仿真执行器，组合车辆模型与同一个 Runtime；不包含地图绘制或 ROS 发布。
 - `scenario/`：ROS-free 场景合同，统一初始位姿、路线、障碍、默认 Mission、车辆约束和 Behavior Profile。
 - `vehicle/`：底盘边界；`VehicleInterface` 统一状态读取、控制执行和健康检查，仿真由 `SimulatedVehicle` 实现，真实 CAN/线控底盘实现相同接口。
@@ -56,7 +56,7 @@ Waypoint = pose(x,y,yaw) + curvature + velocity
          + acceleration + relative_time
 ```
 
-当前 `ReferencePathPlanner` 是场景无关基线：对任意参考路径增密、限制前视距离、计算航向/曲率并执行基础局部绕行。`PurePursuitController` 是默认控制器，通过接口可替换实现。旧 Lattice/EM 及旧横向控制器仍依赖圆环假设或旧轨迹类型，源码仅供教学对照，已从默认构建和正式能力面移除。
+当前 `ReferencePathPlanner` 是场景无关基线；Lattice/EM 和 Stanley/LQR/MPC 已通过 Adapter 接入统一接口，但 Lattice/EM 仍是环道 Frenet 实验实现，不能宣称为通用场景规划器。默认先保证 Runtime 闭环稳定，再逐个完成算法的场景无关化。
 
 ## 运行状态与任务状态
 
@@ -107,6 +107,10 @@ Runtime。
 `RingDemo` Profile 已由该合同提供。`RingMap` 暂时仍负责 RViz Marker 和环道
 静态障碍，后续再迁到完整 Scenario Adapter。
 
+MiningHaul 路线现在是一条非闭合的 `LOAD → DUMP` 运输路线，并包含 `z` 高程：路面 Marker、稠密 Trajectory waypoint、ROS
+`TrajectoryPoint.pose.position.z`、车体 Marker、Odometry 和 TF 都会跟随路线高程显示。
+这一阶段只改善视觉和轨迹高程，车辆动力仍是二维 Ackermann；暂不包含 pitch、坡度阻力或重载动力学。
+
 ## ROS 2 接口收敛目标
 
 ROS 命名空间由 launch 参数传入，例如 `robot_namespace:=car01`；节点内使用相对名称，禁止硬编码 `/sdc`。
@@ -154,13 +158,13 @@ reliable，RuntimeStatus/Fault 和静态地图使用 reliable + transient-local�
 source /opt/ros/jazzy/setup.bash   # 或 humble
 colcon build --packages-select self_driving_car_demo
 source install/setup.bash
-ros2 launch self_driving_car_demo ring_road.launch.py
+ros2 launch self_driving_car_demo autonomy.launch.py
 # 多车/隔离接口：话题位于 /car01/...
-ros2 launch self_driving_car_demo ring_road.launch.py robot_namespace:=car01
+ros2 launch self_driving_car_demo autonomy.launch.py robot_namespace:=car01
 # 真正切换到最小矿区运输场景（自动选 MiningHaul Profile）
-ros2 launch self_driving_car_demo ring_road.launch.py scenario:=mining_haul
+ros2 launch self_driving_car_demo autonomy.launch.py scenario:=mining_haul
 # 场景和行为策略可交叉组合做测试
-ros2 launch self_driving_car_demo ring_road.launch.py \
+ros2 launch self_driving_car_demo autonomy.launch.py \
   scenario:=mining_haul behavior_profile:=RingDemo
 ```
 
@@ -185,7 +189,11 @@ colcon build --packages-select self_driving_car_demo --cmake-clean-cache
 前视/最大转角、速度规划的横向与纵向约束，以及 Safety 状态超时。ROS Adapter
 完成参数合法性检查后，通过 Runtime 的可替换组件接口注入，不让核心层读取 ROS 参数。
 
-默认 Demo 使用 `ReferencePathPlanner + VelocityPlanner + PurePursuitController`、随机障碍、Ackermann 模型和 RViz 可视化。旧 Lattice/EM、Stanley/LQR/MPC/AutoDriver 代码仅作历史教学对照，不进入默认构建，也不暴露直接切换内部实现的正式 ROS 控制接口。
+默认使用 `planner.type:=auto`：环形场景选择带车道状态的 `RingLanePlanner + PurePursuit`，矿区选择 `ReferencePathPlanner + PurePursuit`。`RingLanePlanner` 使用 24 m 局部视距和 8 m 变道距离，生成连续的 Frenet 变道轨迹，不再对单个 waypoint 做横向硬偏移。Lattice/EM 仅保留为环道算法实验，不作为跨场景默认规划器。
+环形基准为真正双车道（总宽 6 m）：车辆默认沿左侧车道（内侧半径 24.5 m）行驶，中心双黄线位于道路中间；当前默认使用 3 个间隔较远的左车道固定障碍物验证连续变道，变道距离默认 8 m。随机障碍模式可设置
+`simulation.fixed_ring_obstacles:=false`，障碍物管理器每 3 秒更新一次。
+仿真默认在连续健康周期后自动解除软件 STOP 锁存；真实车辆应设置
+`simulation.auto_recover_safety:=false`，由操作员确认恢复。
 
 ## 目录（迁移态）
 
@@ -232,7 +240,7 @@ colcon test-result --verbose
 ## Record / Replay
 
 `RuntimeRecorder` 可记录每周期车辆状态、障碍物、Runtime 状态、安全控制和完整
-稠密轨迹，并以带魔数的 `SDC_REPLAY_V1` 高精度文本格式保存/加载。
+稠密轨迹，并以带魔数的 `SDC_REPLAY_V2` 高精度文本格式保存/加载（同时兼容读取 V1）。
 `replayFrame()` 将记录输入重新送入任意 `VehicleRuntime`，用于离线调试和确定性回归。
 SimulationEngine 可通过 `enableRecording(true)` 开启内存记录。Mission 定义需在回放开始
 前由测试或工具显式安装，ROS 录制控制接口和自动误差阈值仍待实现。
@@ -242,3 +250,20 @@ SimulationEngine 可通过 `enableRecording(true)` 开启内存记录。Mission 
 仿真引擎提供定位和感知可用性故障注入，用于可重复验证 watchdog 与安全停车。
 接口冲突的旧 `car_controller_node.cpp` 已从构建和安装目标移除，源码暂留作历史参考，
 不会再与正式 Runtime 同时发布控制结果。
+当前 `VehicleRuntime` 默认组合为 `ReferencePathPlanner + MPC`：两者都接入统一
+`Planner`/`Controller` 接口并直接消费稠密 waypoint。Pure Pursuit、Stanley、LQR 也可通过
+`controller_type` 切换；Lattice/EM 目前主要用于环道算法实验。
+矿区场景会自动使用更短前视距离（0.8 m / 0.5 s）和 2.8 m 轴距，减少折线路段切弯；仍可通过
+`controller.minimum_lookahead`、`controller.lookahead_time` 覆盖。
+
+默认规划器和控制器现在分别为稳定的 `reference_path` 与 `mpc`。Lattice 已接入但暂作为实验模式，
+因为其旧实现仍依赖环道 Frenet 假设，在障碍物动态切换时会出现候选轨迹抖动。也可通过统一 Adapter 选择：
+`planner_type:=reference_path|lattice|em` 与 `controller_type:=pure_pursuit|stanley|lqr|mpc`。
+例如：
+
+```bash
+ros2 launch self_driving_car_demo autonomy.launch.py \
+  planner_type:=lattice controller_type:=mpc
+```
+
+Lattice/EM 的候选结果会转换为统一 `Trajectory<Waypoint>` 后再交给控制器。

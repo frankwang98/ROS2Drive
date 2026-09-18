@@ -7,18 +7,16 @@ ScenarioDefinition makeMiningHaulScenarioDefinition() {
   definition.id = "mining_haul";
   definition.initial_pose = {-32.0, -16.0, 0.0};
   definition.reference_route = {
-      {-32.0, -16.0, 0.0}, {-12.0, -16.0, 0.0},
-      {8.0, -10.0, 0.35},  {30.0, -4.0, 0.0},
-      {34.0, 14.0, 1.57},  {12.0, 20.0, 2.85},
-      {-12.0, 16.0, -2.95}, {-34.0, 6.0, -1.57},
-      {-32.0, -16.0, 0.0}};
+      {-32.0, -16.0, 0.0, 0.0}, {-12.0, -16.0, 0.0, 0.5},
+      {8.0, -10.0, 0.35, 2.0},  {30.0, -4.0, 0.0, 4.0},
+      {34.0, 14.0, 1.57, 6.0}};
 
   // Deterministic roadside hazards; they exercise perception without
   // blocking the reference-route centreline.
   definition.static_obstacles = {
-      {"haul-barrier-1", {-4.0, -11.5, 0.0}, 1.1, false},
-      {"haul-barrier-2", {20.0, -1.0, 0.0}, 1.2, false},
-      {"dump-zone-cone", {29.0, 11.0, 0.0}, 0.8, false}};
+      {"haul-barrier-1", {-4.0, -11.5, 0.0, 1.2}, 1.1, false},
+      {"haul-barrier-2", {20.0, -1.0, 0.0, 3.6}, 1.2, false},
+      {"dump-zone-cone", {29.0, 11.0, 0.0, 5.8}, 0.8, false}};
 
   definition.vehicle_constraints.maximum_speed = 1.5;
   definition.vehicle_constraints.maximum_acceleration = 0.6;

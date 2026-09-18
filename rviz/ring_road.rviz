@@ -1,4 +1,6 @@
 Panels:
+  - Class: sdc/HudPanel
+    Name: Autonomy HUD Controls
   - Class: rviz_common/Displays
     Help Height: 78
     Name: Displays

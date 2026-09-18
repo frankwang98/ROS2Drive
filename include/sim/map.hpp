@@ -88,7 +88,9 @@ class ScenarioMap {
 ///   - 保留随机动态障碍物避障（由 ObstacleManager 注入）
 class RingMap : public ScenarioMap {
  public:
-  RingMap(double radius = 26.0, double road_width = 9.0);
+  // Two-lane bidirectional ring: 3 m per lane, not the previous three-lane
+  // teaching road.
+  RingMap(double radius = 26.0, double road_width = 6.0);
 
   std::string name() const override { return "环形道路"; }
   visualization_msgs::msg::MarkerArray build_road_markers() const override;

@@ -10,11 +10,16 @@
     scenario: ring_demo
     behavior_profile: auto
     bt_tree_id: ""
+    simulation:
+      fixed_ring_obstacles: true
+      auto_recover_safety: true
     planner:
+      type: auto
       spacing: 0.25
       horizon: 30.0
       obstacle_margin: 0.8
     controller:
+      type: auto
       wheelbase: 2.0
       minimum_lookahead: 1.5
       lookahead_time: 1.0

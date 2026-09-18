@@ -73,10 +73,18 @@ add_library(sdc_runtime_core STATIC
   src/replay/runtime_replay.cpp
   src/runtime/vehicle_runtime.cpp
   src/control/trajectory_controller.cpp
+  src/control/legacy_controller_adapter.cpp
+  src/control/steering_controller.cpp
+  src/control/lqr_controller.cpp
+  src/control/mpc_controller.cpp
   src/mission/mission_manager.cpp
   src/safety/fault_manager.cpp
   src/safety/safety_manager.cpp
   src/planning/reference_path_planner.cpp
+  src/planning/ring_lane_planner.cpp
+  src/planning/lattice_planner.cpp
+  src/planning/em_planner.cpp
+  src/planning/legacy_planner_adapter.cpp
   src/planning/velocity_planner.cpp
   src/control/pid_controller.cpp
   src/control/velocity_controller.cpp
@@ -178,6 +186,7 @@ if(SDC_BUILD_RVIZ_PANEL)
     rclcpp
     std_msgs
     geometry_msgs
+    nav_msgs
     rviz_common
   )
   target_compile_definitions(sdc_hud_panel PRIVATE QT_NO_KEYWORDS)

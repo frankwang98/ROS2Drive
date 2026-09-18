@@ -6,6 +6,7 @@
 
 #include "mission/mission_manager.hpp"
 #include "planning/reference_path_planner.hpp"
+#include "planning/ring_lane_planner.hpp"
 #include "runtime/vehicle_runtime.hpp"
 #include "safety/safety_manager.hpp"
 #include "scenario/ring_scenario.hpp"
@@ -44,10 +45,12 @@ TEST(ScenarioDefinition, MiningHaulChangesRouteObstaclesAndProfile) {
   EXPECT_EQ(definition.id, "mining_haul");
   EXPECT_EQ(definition.default_behavior_profile, "MiningHaul");
   EXPECT_EQ(definition.default_mission.type, MissionType::kFollowRoute);
-  EXPECT_GE(definition.reference_route.size(), 8u);
+  EXPECT_GE(definition.reference_route.size(), 5u);
   EXPECT_FALSE(definition.static_obstacles.empty());
   EXPECT_LT(definition.vehicle_constraints.maximum_speed, 2.0);
   EXPECT_NEAR(definition.initial_pose.x, -32.0, 1e-9);
+  EXPECT_GT(definition.reference_route.back().z, definition.reference_route.front().z);
+  EXPECT_NE(definition.reference_route.front().x, definition.reference_route.back().x);
 }
 
 TEST(MissionManager, ValidatesLifecycleAndPreemption) {
@@ -120,6 +123,66 @@ TEST(ReferencePathPlanner, AvoidsObstacleWithoutRingGeometry) {
   for (const auto& point : result.trajectory.points)
     shifted = shifted || std::abs(point.pose.y) > 0.5;
   EXPECT_TRUE(shifted);
+}
+
+TEST(RingLanePlanner, CommitsToRightLaneForLeftLaneObstacle) {
+  sdc::planning::RingLanePlanner planner;
+  sdc::planning::PlanningInput input;
+  input.vehicle.localized = true;
+  input.vehicle.pose = {24.5, 0.0, M_PI_2};
+  for (int i = 0; i <= 120; ++i) {
+    const double angle = 2.0 * M_PI * i / 120.0;
+    input.reference_path.push_back(
+        {24.5 * std::cos(angle), 24.5 * std::sin(angle), angle + M_PI_2});
+  }
+  input.obstacles.push_back({"left-lane-blocker", {24.5 * std::cos(0.85),
+                            24.5 * std::sin(0.85), 0.0}, 0.8, false});
+  input.speed_limit = 1.5;
+  const auto result = planner.plan(input);
+  ASSERT_TRUE(result.success);
+  ASSERT_FALSE(result.trajectory.points.empty());
+  double max_radius = 0.0;
+  for (const auto& point : result.trajectory.points)
+    max_radius = std::max(max_radius, std::hypot(point.pose.x, point.pose.y));
+  EXPECT_GT(max_radius, 26.8);
+}
+
+TEST(RingLanePlanner, RejectsTrajectoryThatWouldCollide) {
+  sdc::planning::RingLanePlanner planner;
+  sdc::planning::PlanningInput input;
+  input.vehicle.localized = true;
+  input.vehicle.pose = {24.5, 0.0, M_PI_2};
+  for (int i = 0; i <= 120; ++i) {
+    const double angle = 2.0 * M_PI * i / 120.0;
+    input.reference_path.push_back(
+        {24.5 * std::cos(angle), 24.5 * std::sin(angle), angle + M_PI_2});
+  }
+  // The obstacle spans both 3 m lanes. A lane change is not feasible.
+  input.obstacles.push_back({"blocked-road", {26.0 * std::cos(0.4),
+                            26.0 * std::sin(0.4), 0.0}, 3.0, false});
+  input.speed_limit = 1.5;
+  const auto result = planner.plan(input);
+  EXPECT_FALSE(result.success);
+  EXPECT_EQ(result.reason, "ring_lane_collision_predicted");
+}
+
+TEST(RingLanePlanner, DoesNotStopForPassedLeftLaneObstacle) {
+  sdc::planning::RingLanePlanner planner;
+  sdc::planning::PlanningInput input;
+  input.vehicle.localized = true;
+  const double vehicle_angle = 1.0;
+  input.vehicle.pose = {27.5 * std::cos(vehicle_angle),
+                        27.5 * std::sin(vehicle_angle), vehicle_angle + M_PI_2};
+  for (int i = 0; i <= 120; ++i) {
+    const double angle = 2.0 * M_PI * i / 120.0;
+    input.reference_path.push_back(
+        {24.5 * std::cos(angle), 24.5 * std::sin(angle), angle + M_PI_2});
+  }
+  input.obstacles.push_back({"passed-left-blocker", {24.5 * std::cos(0.85),
+                            24.5 * std::sin(0.85), 0.0}, 0.8, false});
+  input.speed_limit = 1.5;
+  const auto result = planner.plan(input);
+  EXPECT_TRUE(result.success) << result.reason;
 }
 
 TEST(SafetyManager, StopsForTimeoutPlanningFailureAndEstop) {

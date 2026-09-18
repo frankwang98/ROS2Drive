@@ -6,7 +6,9 @@
 
 namespace sdc::domain {
 
-struct Pose2D { double x{0.0}; double y{0.0}; double yaw{0.0}; };
+// Planar pose with optional elevation. Runtime control remains planar for now;
+// z is carried by routes/trajectories for 3D visualization and future grade control.
+struct Pose2D { double x{0.0}; double y{0.0}; double yaw{0.0}; double z{0.0}; };
 struct Twist2D { double linear{0.0}; double angular{0.0}; };
 
 struct VehicleState {

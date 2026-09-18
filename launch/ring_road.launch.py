@@ -62,6 +62,10 @@ def generate_launch_description():
                                   description="Behavior profile; auto uses the scenario default"),
             DeclareLaunchArgument("bt_tree_id", default_value="",
                                   description="Deprecated alias of behavior_profile"),
+            DeclareLaunchArgument("planner_type", default_value="auto",
+                                  description="Planner: auto/ring_lane/lattice/em/reference_path"),
+            DeclareLaunchArgument("controller_type", default_value="auto",
+                                  description="Controller: mpc/lqr/stanley/pure_pursuit"),
 
             # ---------- 自动驾驶仿真节点 ----------
             Node(
@@ -79,6 +83,8 @@ def generate_launch_description():
                         "scenario": LaunchConfiguration("scenario"),
                         "behavior_profile": LaunchConfiguration("behavior_profile"),
                         "bt_tree_id": LaunchConfiguration("bt_tree_id"),
+                        "planner.type": LaunchConfiguration("planner_type"),
+                        "controller.type": LaunchConfiguration("controller_type"),
                     },
                 ],
             ),

@@ -5,15 +5,15 @@ namespace sdc {
 const char* action_name(Action action) {
   switch (action) {
     case Action::kAccelerate:
-      return "加速";
+      return "ACCELERATE";
     case Action::kCruise:
-      return "匀速巡航";
+      return "CRUISE";
     case Action::kBrake:
-      return "减速";
+      return "BRAKE";
     case Action::kStop:
-      return "停车";
+      return "STOP";
     default:
-      return "未知";
+      return "UNKNOWN";
   }
 }
 

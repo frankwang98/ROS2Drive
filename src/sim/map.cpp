@@ -222,26 +222,6 @@ MarkerArray RingMap::build_road_markers() const {
     ma.markers.push_back(m);
   }
 
-  // 车道引导线（把车道细分出内/中/外三车道的虚线）——增强路感
-  for (int k = 1; k <= 2; ++k) {
-    Marker m;
-    m.header.frame_id = "world";
-    m.ns = "lane"; m.id = k;
-    m.type = Marker::LINE_LIST; m.action = Marker::ADD;
-    m.pose.orientation.w = 1.0;
-    m.scale.x = 0.08;
-    m.color.r = 1.0f; m.color.g = 1.0f; m.color.b = 1.0f; m.color.a = 0.5f;
-    double lane_r = radius_ + (k == 1 ? -road_width_ / 4.0 : road_width_ / 4.0);
-    constexpr int DASH = 140;
-    for (int i = 0; i < DASH; ++i) {
-      double a0 = 2.0 * M_PI * i / DASH;
-      double a1 = 2.0 * M_PI * (i + 0.4) / DASH;
-      m.points.push_back(make_point(lane_r * std::cos(a0), lane_r * std::sin(a0), z));
-      m.points.push_back(make_point(lane_r * std::cos(a1), lane_r * std::sin(a1), z));
-    }
-    ma.markers.push_back(m);
-  }
-
   // 内/外边界（实线白边）
   for (int k = 0; k < 2; ++k) {
     Marker m;
@@ -383,7 +363,7 @@ MarkerArray DefinitionScenarioMap::build_road_markers() const {
 MarkerArray DefinitionScenarioMap::build_extra_markers() const {
   MarkerArray markers;
   const char* labels[] = {"LOAD", "DUMP"};
-  const std::size_t indices[] = {0, definition_.reference_route.size() / 2};
+  const std::size_t indices[] = {0, definition_.reference_route.size() - 1};
   for (int i = 0; i < 2; ++i) {
     const auto& pose = definition_.reference_route[indices[i]];
     Marker marker;

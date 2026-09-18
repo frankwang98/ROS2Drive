@@ -33,11 +33,13 @@
 
 #include <chrono>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
 #include <deque>
 #include <memory>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -67,6 +69,9 @@
 #include "sim/map.hpp"
 #include "sim/obstacle_manager.hpp"
 #include "planning/reference_path_planner.hpp"
+#include "planning/ring_lane_planner.hpp"
+#include "planning/legacy_planner_adapter.hpp"
+#include "control/legacy_controller_adapter.hpp"
 #include "simulation/simulation_engine.hpp"
 #include "behavior_tree/behavior_tree_behavior.hpp"
 #include "ros/runtime_message_converter.hpp"
@@ -142,11 +147,17 @@ public:
     base_frame_ = declare_parameter<std::string>("base_frame", "car_base_link");
     const double update_rate_hz = declare_parameter<double>("update_rate_hz", 20.0);
     const double lidar_rate_hz = declare_parameter<double>("lidar_rate_hz", 10.0);
+    fixed_ring_obstacles_ = declare_parameter<bool>("simulation.fixed_ring_obstacles", true);
+    auto_recover_safety_ = declare_parameter<bool>("simulation.auto_recover_safety", true);
     const std::string bt_xml = declare_parameter<std::string>("bt_xml", "");
     const std::string scenario_id =
         declare_parameter<std::string>("scenario", "ring_demo");
     const std::string configured_behavior_profile =
         declare_parameter<std::string>("behavior_profile", "auto");
+    const std::string controller_type =
+        declare_parameter<std::string>("controller.type", "auto");
+    const std::string planner_type =
+        declare_parameter<std::string>("planner.type", "auto");
     // Compatibility alias. Prefer behavior_profile for new launch files.
     const std::string legacy_bt_tree_id =
         declare_parameter<std::string>("bt_tree_id", "");
@@ -170,9 +181,15 @@ public:
     planner_config.horizon = declare_parameter<double>("planner.horizon", 30.0);
     planner_config.obstacle_margin = declare_parameter<double>("planner.obstacle_margin", 0.8);
     control::PurePursuitController::Config controller_config;
-    controller_config.wheelbase = declare_parameter<double>("controller.wheelbase", 2.0);
-    controller_config.minimum_lookahead = declare_parameter<double>("controller.minimum_lookahead", 1.5);
-    controller_config.lookahead_time = declare_parameter<double>("controller.lookahead_time", 1.0);
+    // The current VehicleRuntime consumes a dense reference trajectory, so
+    // Pure Pursuit is the integrated controller.  Use a tighter lookahead for
+    // the sparse, low-speed mining haul road; it prevents cutting corners.
+    const double wheelbase_default = scenario_id == "mining_haul" ? 2.8 : 2.0;
+    const double lookahead_default = scenario_id == "mining_haul" ? 0.8 : 1.5;
+    const double lookahead_time_default = scenario_id == "mining_haul" ? 0.5 : 1.0;
+    controller_config.wheelbase = declare_parameter<double>("controller.wheelbase", wheelbase_default);
+    controller_config.minimum_lookahead = declare_parameter<double>("controller.minimum_lookahead", lookahead_default);
+    controller_config.lookahead_time = declare_parameter<double>("controller.lookahead_time", lookahead_time_default);
     controller_config.maximum_steering = declare_parameter<double>("controller.maximum_steering", 0.55);
     planning::VelocityPlanner::Config velocity_config;
     velocity_config.maximum_lateral_acceleration = declare_parameter<double>("velocity.maximum_lateral_acceleration", 1.2);
@@ -223,8 +240,39 @@ public:
         RCLCPP_WARN(get_logger(), "BehaviorTree fallback: %s", behavior->lastError().c_str());
       simulation_.setBehaviorManager(std::move(behavior));
     }
-    simulation_.setPlanner(std::make_unique<planning::ReferencePathPlanner>(planner_config));
-    simulation_.setController(std::make_unique<control::PurePursuitController>(controller_config));
+    const std::string selected_planner = planner_type == "auto"
+                                             ? (scenario_id == "ring_demo" ? "ring_lane" : "reference_path")
+                                             : planner_type;
+    const std::string selected_controller = controller_type == "auto"
+                                                 ? "pure_pursuit"
+                                                 : controller_type;
+    if (selected_planner == "ring_lane") {
+      if (scenario_id != "ring_demo")
+        throw std::invalid_argument("ring_lane planner requires scenario:=ring_demo");
+      simulation_.setPlanner(std::make_unique<planning::RingLanePlanner>());
+    } else if (selected_planner == "reference_path") {
+      simulation_.setPlanner(std::make_unique<planning::ReferencePathPlanner>(planner_config));
+    } else if (selected_planner == "lattice" || selected_planner == "em") {
+      const auto type = selected_planner == "lattice"
+                            ? planning::LegacyPlannerAdapter::Type::kLattice
+                            : planning::LegacyPlannerAdapter::Type::kEm;
+      simulation_.setPlanner(std::make_unique<planning::LegacyPlannerAdapter>(type));
+    } else {
+      throw std::invalid_argument("unsupported planner.type: " + selected_planner);
+    }
+    if (selected_controller == "pure_pursuit") {
+      simulation_.setController(std::make_unique<control::PurePursuitController>(controller_config));
+    } else if (selected_controller == "stanley" || selected_controller == "lqr" || selected_controller == "mpc") {
+      const auto type = selected_controller == "stanley"
+                            ? control::LegacyControllerAdapter::Type::kStanley
+                            : selected_controller == "lqr"
+                                  ? control::LegacyControllerAdapter::Type::kLqr
+                                  : control::LegacyControllerAdapter::Type::kMpc;
+      simulation_.setController(std::make_unique<control::LegacyControllerAdapter>(
+          type, controller_config.wheelbase, controller_config.maximum_steering, sim_dt_));
+    } else {
+      throw std::invalid_argument("unsupported controller.type: " + selected_controller);
+    }
     simulation_.setVelocityPlanner(planning::VelocityPlanner(velocity_config));
     simulation_.setSafetyManager(safety::SafetyManager(safety_config));
     auto road_qos = rclcpp::QoS(1).reliable().transient_local();
@@ -293,7 +341,7 @@ public:
             paused_ = false;
             driving_ = true;
             simulation_.resume();
-            RCLCPP_INFO(get_logger(), "已开始行驶");
+            RCLCPP_INFO(get_logger(), "Driving started");
           }
         });
     // 暂停/继续
@@ -301,12 +349,12 @@ public:
         "sdc/pause", command_qos, [this](const std_msgs::msg::Bool::SharedPtr msg) {
           paused_ = msg->data;
           if (paused_) simulation_.pause(); else simulation_.resume();
-          RCLCPP_INFO(get_logger(), paused_ ? "仿真已暂停" : "仿真已继续");
+          RCLCPP_INFO(get_logger(), paused_ ? "Simulation paused" : "Simulation resumed");
         });
     // 清除轨迹
     clear_sub_ = create_subscription<std_msgs::msg::Bool>(
         "sdc/clear_trail", command_qos, [this](const std_msgs::msg::Bool::SharedPtr msg) {
-          if (msg->data) { trail_.clear(); RCLCPP_INFO(get_logger(), "行驶轨迹已清除"); }
+          if (msg->data) { trail_.clear(); RCLCPP_INFO(get_logger(), "Vehicle trail cleared"); }
         });
     // 驾驶模式切换（0=自动 1=手动）
     set_mode_sub_ = create_subscription<std_msgs::msg::Int32>(
@@ -329,7 +377,7 @@ public:
         "sdc/emergency_stop", rclcpp::QoS(1).reliable(),
         [this](const std_msgs::msg::Bool::SharedPtr msg) {
           simulation_.requestEmergencyStop(msg->data);
-          RCLCPP_WARN(get_logger(), "软件急停: %s", msg->data ? "ACTIVE" : "CLEARED");
+          RCLCPP_WARN(get_logger(), "Software emergency stop: %s", msg->data ? "ACTIVE" : "CLEARED");
         });
 
     tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
@@ -347,7 +395,7 @@ public:
 
     load_scenario();
 
-    RCLCPP_INFO(get_logger(), "自动驾驶仿真启动：%s (Behavior=%s)",
+    RCLCPP_INFO(get_logger(), "Autonomy simulation started: scenario=%s behavior=%s",
                 scenario_definition_.id.c_str(), behavior_profile.c_str());
   }
 
@@ -439,15 +487,15 @@ private:
     road_markers_ = map_->build_road_markers();
     extra_markers_ = map_->build_extra_markers();
     publish_road_markers();
-    RCLCPP_INFO(get_logger(), "已加载场景: %s", map_->name().c_str());
+    RCLCPP_INFO(get_logger(), "Scenario loaded: %s", scenario_definition_.id.c_str());
   }
 
   void set_mode(Mode m) {
     mode_ = m;
     manual_throttle_ = 0.0;
     manual_steer_ = 0.0;
-    RCLCPP_INFO(get_logger(), "驾驶模式切换为: %s",
-                (mode_ == Mode::kManual ? "手动(WASD)" : "自动"));
+    RCLCPP_INFO(get_logger(), "Driving mode set to: %s",
+                (mode_ == Mode::kManual ? "MANUAL (WASD)" : "AUTONOMOUS"));
   }
 
   // 重置小车到当前场景起点
@@ -456,7 +504,7 @@ private:
     trail_.clear();
     manual_throttle_ = 0.0;
     manual_steer_ = 0.0;
-    RCLCPP_INFO(get_logger(), "小车已重置到场景起点: %s",
+    RCLCPP_INFO(get_logger(), "Vehicle reset to scenario start: %s",
                 scenario_definition_.id.c_str());
   }
 
@@ -474,8 +522,13 @@ private:
     const auto loop_started = std::chrono::steady_clock::now();
     if (driving_ && !paused_) {
       // 动态随机障碍物
-      if (scenario_definition_.id == "ring_demo")
-        obstacle_manager_.update(sim_dt_);
+      if (scenario_definition_.id == "ring_demo" && !fixed_ring_obstacles_) {
+        dynamic_obstacle_update_accum_ += sim_dt_;
+        if (dynamic_obstacle_update_accum_ >= 3.0) {
+          obstacle_manager_.update(dynamic_obstacle_update_accum_);
+          dynamic_obstacle_update_accum_ = 0.0;
+        }
+      }
       if (mode_ == Mode::kManual) {
         // 手动驾驶：WASD 直接控制
         double throttle = manual_throttle_;
@@ -487,12 +540,35 @@ private:
       } else {
         std::vector<domain::Obstacle> runtime_obstacles;
         int obstacle_id = 0;
-        for (const auto& ob : map_->to_obstacles())
-          runtime_obstacles.push_back({"static-" + std::to_string(obstacle_id++), {ob.position.x, ob.position.y, 0.0}, ob.radius, false});
+        // The ring benchmark deliberately excludes legacy slalom, narrow-gate
+        // and wall pseudo-obstacles.  They were authored for the old single-
+        // lane demo and place an inflated wall inside the new left-lane start.
+        // Only the explicit fixed lane blockers belong to this benchmark.
+        if (scenario_definition_.id != "ring_demo") {
+          for (const auto& ob : map_->to_obstacles())
+            runtime_obstacles.push_back({"static-" + std::to_string(obstacle_id++),
+                                         {ob.position.x, ob.position.y, 0.0}, ob.radius, false});
+        }
+        if (scenario_definition_.id == "ring_demo" && fixed_ring_obstacles_) {
+          constexpr double ring_radius = 24.5;
+          // Fixed center-lane obstacles force a reproducible lane-change test.
+          for (const auto& spec : std::array<std::pair<double, double>, 3>{{
+                   {0.85, 0.0}, {3.00, 0.0}, {5.15, 0.0}}}) {
+            const double r = ring_radius + spec.second;
+            runtime_obstacles.push_back({"ring-fixed-" + std::to_string(obstacle_id++),
+                                         {r * std::cos(spec.first), r * std::sin(spec.first), 0.0},
+                                         0.8, false});
+          }
+        }
         for (const auto& ob : obstacle_manager_.obstacles())
           runtime_obstacles.push_back({"dynamic-" + std::to_string(obstacle_id++), {ob.x, ob.y, 0.0}, ob.radius, true});
         simulation_.setObstacles(std::move(runtime_obstacles));
         const auto output = simulation_.step(sim_dt_);
+        if (auto_recover_safety_ && simulation_.runtime().safetyRecoveryReady())
+          simulation_.acknowledgeSafetyRecovery();
+        last_planning_success_ = output.planning.success;
+        last_planning_reason_ = output.planning.reason;
+        last_safety_action_ = static_cast<int>(simulation_.runtime().safety().lastAction());
         last_front_dist_ = driver_front_dist();
         last_action_ = output.control.target_speed < 0.05 ? Action::kStop :
                        output.control.target_speed < 1.0 ? Action::kBrake : Action::kCruise;
@@ -500,15 +576,21 @@ private:
 
       // 记录轨迹
       sim_time_ += sim_dt_;
-      trail_.push_back(make_point(simulation_.vehicle().x(), simulation_.vehicle().y(), 0.05));
+      const double vehicle_z = scenario_height_at(simulation_.vehicle().x(),
+                                                  simulation_.vehicle().y());
+      trail_.push_back(make_point(simulation_.vehicle().x(), simulation_.vehicle().y(), vehicle_z + 0.05));
       if (trail_.size() > TRAIL_MAX_POINTS) trail_.pop_front();
 
-      if (static_cast<int>(sim_time_ * 10) % 5 == 0 &&
-          static_cast<int>(sim_time_ * 100) % 100 == 0) {
+      if (sim_time_ + 1e-9 >= next_status_log_s_) {
         RCLCPP_INFO(get_logger(),
-                    "[%.1fs] 模式:%-6s | 速度:%.2f | 前方:%.2f | 行为:%-6s",
-                    sim_time_, mode_ == Mode::kManual ? "手动" : "自动",
-                    simulation_.vehicle().speed(), last_front_dist_, action_name(last_action_));
+                    "[%.1fs] mode=%-10s speed=%.2f m/s front=%.2f m action=%-10s plan=%s safety=%d reason=%s",
+                    sim_time_, mode_ == Mode::kManual ? "MANUAL" : "AUTONOMOUS",
+                    simulation_.vehicle().speed(), last_front_dist_, action_name(last_action_),
+                    last_planning_success_ ? "OK" : "FAILED", last_safety_action_,
+                    last_planning_reason_.c_str());
+        do {
+          next_status_log_s_ += 1.0;
+        } while (next_status_log_s_ <= sim_time_);
       }
     }
 
@@ -531,7 +613,15 @@ private:
 
   // 手动模式下计算前方障碍距离（含静态复杂路况 + 动态障碍）
   double driver_front_dist() {
-    auto obstacles = map_->to_obstacles();
+    std::vector<Obstacle> obstacles;
+    if (scenario_definition_.id == "ring_demo" && fixed_ring_obstacles_) {
+      constexpr double ring_radius = 24.5;
+      for (const double angle : {0.85, 3.00, 5.15})
+        obstacles.push_back(Obstacle{{ring_radius * std::cos(angle),
+                                      ring_radius * std::sin(angle)}, 0.8});
+    } else if (scenario_definition_.id != "ring_demo") {
+      obstacles = map_->to_obstacles();
+    }
     for (const auto& ob : obstacle_manager_.obstacles())
       obstacles.push_back(Obstacle{Vec2{ob.x, ob.y}, ob.radius});
     double cx = simulation_.vehicle().x(), cy = simulation_.vehicle().y(), cyaw = simulation_.vehicle().yaw();
@@ -544,6 +634,33 @@ private:
       if (dist < min_d && (dx * fx + dy * fy) > 0.2) min_d = dist;
     }
     return min_d;
+  }
+
+  double scenario_height_at(double x, double y) const {
+    const auto& route = scenario_definition_.reference_route;
+    if (route.empty()) return 0.0;
+    double best_distance = std::numeric_limits<double>::max();
+    double best_z = route.front().z;
+    for (std::size_t i = 1; i < route.size(); ++i) {
+      const auto& a = route[i - 1];
+      const auto& b = route[i];
+      const double dx = b.x - a.x;
+      const double dy = b.y - a.y;
+      const double length_sq = dx * dx + dy * dy;
+      const double t = length_sq > 1e-9
+                           ? std::clamp(((x - a.x) * dx + (y - a.y) * dy) /
+                                             length_sq,
+                                         0.0, 1.0)
+                           : 0.0;
+      const double px = a.x + t * dx;
+      const double py = a.y + t * dy;
+      const double distance = std::hypot(x - px, y - py);
+      if (distance < best_distance) {
+        best_distance = distance;
+        best_z = a.z + t * (b.z - a.z);
+      }
+    }
+    return best_z;
   }
 
   // ========== 状态话题发布 ==========
@@ -562,8 +679,10 @@ private:
     odom.header.stamp = now();
     odom.header.frame_id = world_frame_;
     odom.child_frame_id = base_frame_;
+    const double vehicle_z = scenario_height_at(simulation_.vehicle().x(), simulation_.vehicle().y());
     odom.pose.pose.position.x = simulation_.vehicle().x();
     odom.pose.pose.position.y = simulation_.vehicle().y();
+    odom.pose.pose.position.z = vehicle_z;
     const double yaw = simulation_.vehicle().yaw();
     odom.pose.pose.orientation.z = std::sin(yaw / 2.0);
     odom.pose.pose.orientation.w = std::cos(yaw / 2.0);
@@ -617,6 +736,22 @@ private:
       m.scale.x = sz; m.scale.y = sz; m.scale.z = 1.0;
       m.color.r = 0.95f; m.color.g = 0.25f; m.color.b = 0.1f; m.color.a = 0.95f;
       ma.markers.push_back(m);
+    }
+    if (scenario_definition_.id == "ring_demo" && fixed_ring_obstacles_) {
+      constexpr double ring_radius = 24.5;
+      int fixed_id = 100;
+      for (const double angle : {0.85, 3.00, 5.15}) {
+        visualization_msgs::msg::Marker m;
+        m.header.frame_id = world_frame_; m.header.stamp = now();
+        m.ns = "fixed_ring_obstacles"; m.id = fixed_id++;
+        m.type = visualization_msgs::msg::Marker::CYLINDER; m.action = m.ADD;
+        m.pose.position.x = ring_radius * std::cos(angle);
+        m.pose.position.y = ring_radius * std::sin(angle);
+        m.pose.position.z = 0.5; m.pose.orientation.w = 1.0;
+        m.scale.x = 1.6; m.scale.y = 1.6; m.scale.z = 1.0;
+        m.color.r = 0.95f; m.color.g = 0.25f; m.color.b = 0.1f; m.color.a = 0.95f;
+        ma.markers.push_back(m);
+      }
     }
     // 静态路况障碍（绕桩锥桶/窄门/路障，黄色/红色）
     // 这里仅绘制锥桶等静态特征，简化处理：复用 map 静态障碍中的桩桶标记
@@ -689,7 +824,7 @@ private:
       m.header.frame_id = world_frame_; m.header.stamp = now();
       m.ns = "car"; m.id = 0;
       m.type = m.CUBE; m.action = m.ADD;
-      m.pose.position.x = cx; m.pose.position.y = cy; m.pose.position.z = 0.5;
+      m.pose.position.x = cx; m.pose.position.y = cy; m.pose.position.z = scenario_height_at(cx, cy) + 0.5;
       m.pose.orientation.z = std::sin(cyaw / 2.0); m.pose.orientation.w = std::cos(cyaw / 2.0);
       m.scale.x = 1.8; m.scale.y = 0.9; m.scale.z = 0.6;
       m.color.r = 0.1f; m.color.g = 0.4f; m.color.b = 0.9f; m.color.a = 1.0f;
@@ -701,7 +836,7 @@ private:
       m.header.frame_id = world_frame_; m.header.stamp = now();
       m.ns = "car"; m.id = 1;
       m.type = m.ARROW; m.action = m.ADD;
-      m.pose.position.x = cx; m.pose.position.y = cy; m.pose.position.z = 1.2;
+      m.pose.position.x = cx; m.pose.position.y = cy; m.pose.position.z = scenario_height_at(cx, cy) + 1.2;
       m.pose.orientation.z = std::sin(cyaw / 2.0); m.pose.orientation.w = std::cos(cyaw / 2.0);
       m.scale.x = 0.6 + std::fabs(simulation_.vehicle().speed()) * 0.3; m.scale.y = 0.25; m.scale.z = 0.25;
       switch (last_action_) {
@@ -730,14 +865,19 @@ private:
       m.header.frame_id = world_frame_; m.header.stamp = now();
       m.ns = "hud"; m.id = 0;
       m.type = m.TEXT_VIEW_FACING; m.action = m.ADD;
-      m.pose.position.x = cx; m.pose.position.y = cy; m.pose.position.z = CAR_HEAD_Z;
-      m.scale.z = 1.4;
-      m.color.r = 1; m.color.g = 1; m.color.b = 1; m.color.a = 1;
+      // Keep the HUD compact and ASCII-only: RViz installations often lack a
+      // Chinese font, which previously rendered as clipped/garbled text.
+      // World-fixed HUD: visible in the RViz scene without requiring a panel
+      // plugin. Keep it away from the vehicle so it does not overlap the car.
+      m.pose.position.x = -34.0; m.pose.position.y = 34.0;
+      m.pose.position.z = 3.0;
+      m.scale.z = 0.75;
+      m.color.r = 0.85f; m.color.g = 0.95f; m.color.b = 1.0f; m.color.a = 1.0f;
       char buf[200];
-      const char* mode_str = (mode_ == Mode::kManual) ? "手动(WASD)" : "自动";
+      const double vehicle_z = scenario_height_at(cx, cy);
       std::snprintf(buf, sizeof(buf),
-                    "模式:%s  v=%.1f m/s  %s  Runtime/PurePursuit",
-                    mode_str, simulation_.vehicle().speed(), action_name(last_action_));
+                    "POS  %.1f  %.1f  %.1f\nSPD  %.1f m/s",
+                    cx, cy, vehicle_z, simulation_.vehicle().speed());
       m.text = buf;
       ma.markers.push_back(m);
     }
@@ -766,7 +906,8 @@ private:
     tf.header.stamp = now();
     tf.header.frame_id = world_frame_;
     tf.child_frame_id = base_frame_;
-    tf.transform.translation.x = cx; tf.transform.translation.y = cy; tf.transform.translation.z = 0.0;
+    tf.transform.translation.x = cx; tf.transform.translation.y = cy;
+    tf.transform.translation.z = scenario_height_at(cx, cy);
     tf.transform.rotation.z = std::sin(cyaw / 2.0);
     tf.transform.rotation.w = std::cos(cyaw / 2.0);
     tf_broadcaster_->sendTransform(tf);
@@ -784,6 +925,7 @@ private:
   double manual_steer_{0.0};
 
   double sim_time_{0.0};
+  double next_status_log_s_{1.0};
   double sim_dt_{0.05};
   double configured_loop_hz_{20.0};
   double last_loop_duration_ms_{0.0};
@@ -794,8 +936,14 @@ private:
   double road_resend_accum_{0.0};
   double last_front_dist_{LIDAR_RANGE};
   Action last_action_{Action::kCruise};
+  bool last_planning_success_{true};
+  int last_safety_action_{0};
+  std::string last_planning_reason_{"not_run"};
   bool   paused_{false};
   bool   driving_{true};
+  bool   fixed_ring_obstacles_{true};
+  bool   auto_recover_safety_{true};
+  double dynamic_obstacle_update_accum_{0.0};
 
   std::deque<geometry_msgs::msg::Point> trail_;
   visualization_msgs::msg::MarkerArray road_markers_;

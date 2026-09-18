@@ -15,6 +15,8 @@
 #include <QString>
 
 #include <rviz_common/display_context.hpp>
+#include <rviz_common/view_manager.hpp>
+#include <rviz_common/render_panel.hpp>
 
 namespace sdc {
 
@@ -97,6 +99,31 @@ void HudPanel::onInitialize() {
   if (!ros_node_abs) return;
   node_ = ros_node_abs->get_raw_node();
 
+  // Fixed-size HUD overlay attached to RViz's 3D render panel. It is a
+  // viewport child, not a world Marker, so zooming/panning never changes its
+  // position or typography.
+  if (auto* view_manager = getDisplayContext()->getViewManager()) {
+    if (auto* render_panel = view_manager->getRenderPanel()) {
+      viewport_hud_ = new QFrame(render_panel);
+      viewport_hud_->setGeometry(14, 14, 210, 92);
+      viewport_hud_->setStyleSheet(
+          "QFrame { background: rgba(18, 24, 32, 215); border: 1px solid #49b6ff;"
+          " border-radius: 10px; } QLabel { color: #eaf6ff; background: transparent; }");
+      auto* layout = new QVBoxLayout(viewport_hud_);
+      layout->setContentsMargins(12, 8, 12, 8);
+      layout->setSpacing(1);
+      viewport_title_ = new QLabel("AUTONOMY  /  CAR01", viewport_hud_);
+      viewport_title_->setStyleSheet("color: #66d9ff; font-weight: 700; letter-spacing: 1px;");
+      viewport_speed_ = new QLabel("SPEED  -- m/s", viewport_hud_);
+      viewport_pose_ = new QLabel("POS    --  --  --", viewport_hud_);
+      layout->addWidget(viewport_title_);
+      layout->addWidget(viewport_speed_);
+      layout->addWidget(viewport_pose_);
+      viewport_hud_->raise();
+      viewport_hud_->show();
+    }
+  }
+
   auto qos = rclcpp::QoS(10);
   speed_sub_ = node_->create_subscription<std_msgs::msg::Float64>(
       "sdc/speed", qos, std::bind(&HudPanel::onSpeed, this, std::placeholders::_1));
@@ -104,6 +131,10 @@ void HudPanel::onInitialize() {
       "sdc/action_id", qos, std::bind(&HudPanel::onAction, this, std::placeholders::_1));
   distance_sub_ = node_->create_subscription<std_msgs::msg::Float64>(
       "sdc/front_distance", qos, std::bind(&HudPanel::onDistance, this, std::placeholders::_1));
+  auto odom_qos = rclcpp::SensorDataQoS().keep_last(5);
+  odom_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
+      "localization/odometry", odom_qos,
+      std::bind(&HudPanel::onOdometry, this, std::placeholders::_1));
   mode_sub_ = node_->create_subscription<std_msgs::msg::Int32>(
       "sdc/mode", qos, std::bind(&HudPanel::onMode, this, std::placeholders::_1));
 
@@ -131,6 +162,11 @@ HudPanel::~HudPanel() {
 void HudPanel::onSpeed(const std_msgs::msg::Float64::SharedPtr msg) { speed_ = msg->data; }
 void HudPanel::onAction(const std_msgs::msg::Float64::SharedPtr msg) { action_id_ = static_cast<int>(msg->data); }
 void HudPanel::onDistance(const std_msgs::msg::Float64::SharedPtr msg) { distance_ = msg->data; }
+void HudPanel::onOdometry(const nav_msgs::msg::Odometry::SharedPtr msg) {
+  pose_x_ = msg->pose.pose.position.x;
+  pose_y_ = msg->pose.pose.position.y;
+  pose_z_ = msg->pose.pose.position.z;
+}
 void HudPanel::onMode(const std_msgs::msg::Int32::SharedPtr msg) {
   manual_ = (msg->data == 1);
   mode_label_->setText(QString("驾驶模式: %1").arg(manual_ ? "手动 (WASD)" : "自动"));
@@ -150,6 +186,13 @@ void HudPanel::onStatusTimer() {
     action_label_->setText(QString("行为: %1").arg(name));
   }
   if (distance_label_) distance_label_->setText(QString("前方距离: %1 m").arg(distance_, 0, 'f', 1));
+  if (viewport_speed_) viewport_speed_->setText(QString("SPEED  %1 m/s").arg(speed_, 0, 'f', 1));
+  if (viewport_pose_) {
+    viewport_pose_->setText(QString("POS    %1  %2  %3")
+                                .arg(pose_x_, 0, 'f', 1)
+                                .arg(pose_y_, 0, 'f', 1)
+                                .arg(pose_z_, 0, 'f', 1));
+  }
   if (pause_button_) pause_button_->setText(paused_ ? "继续" : "暂停");
 
   // 手动模式下持续发送指令（保证松开后自动回中）

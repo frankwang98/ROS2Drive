@@ -40,6 +40,7 @@ class VehicleRuntime {
   const RuntimeOutput& output() const { return output_; }
   const mission::MissionManager& missions() const { return missions_; }
   const safety::FaultManager& faults() const { return safety_.faults(); }
+  const safety::SafetyManager& safety() const { return safety_; }
  private:
   std::unique_ptr<planning::Planner> planner_;
   std::unique_ptr<control::Controller> controller_;
