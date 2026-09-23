@@ -177,7 +177,7 @@ Visualization Manager:
   Value: true
   Views:
     Current:
-      Class: rviz_default_plugins/Orbit
+      Class: rviz_default_plugins/TopDownOrtho
       Distance: 30.7237606048584
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549

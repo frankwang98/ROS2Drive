@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <initializer_list>
 #include <stdexcept>
 #include <utility>
 
@@ -338,14 +339,17 @@ MarkerArray DefinitionScenarioMap::build_road_markers() const {
   road.type = Marker::LINE_STRIP;
   road.action = Marker::ADD;
   road.pose.orientation.w = 1.0;
-  road.scale.x = definition_.id == "agriculture_route" ? 0.12 : 6.0;
-  road.color.r = definition_.id == "agriculture_route" ? 0.75f : 0.22f;
-  road.color.g = definition_.id == "agriculture_route" ? 0.65f : 0.22f;
-  road.color.b = definition_.id == "agriculture_route" ? 0.15f : 0.25f;
+  const bool agriculture = definition_.id == "agriculture_route";
+  const bool defined_road = definition_.id == "mining_haul" ||
+                            definition_.id == "port_transport";
+  road.scale.x = agriculture ? 0.12 : defined_road ? 2.4 : 6.0;
+  road.color.r = agriculture ? 0.75f : defined_road ? 0.12f : 0.22f;
+  road.color.g = agriculture ? 0.65f : defined_road ? 0.14f : 0.22f;
+  road.color.b = agriculture ? 0.15f : defined_road ? 0.17f : 0.25f;
   road.color.a = 1.0f;
   for (const auto& pose : definition_.reference_route)
     road.points.push_back(make_point(pose.x, pose.y, 0.01));
-  if (definition_.id != "agriculture_route")
+  if (definition_.id != "agriculture_route" && !defined_road)
     markers.markers.push_back(road);
 
   Marker center = road;
@@ -357,7 +361,7 @@ MarkerArray DefinitionScenarioMap::build_road_markers() const {
   center.color.b = 0.1f;
   center.color.a = 0.9f;
   center.pose.position.z = 0.04;
-  if (definition_.id != "agriculture_route")
+  if (!agriculture)
     markers.markers.push_back(std::move(center));
   if (definition_.id == "agriculture_route") {
     Marker field_surface;
@@ -405,6 +409,79 @@ MarkerArray DefinitionScenarioMap::build_road_markers() const {
     }
     markers.markers.push_back(std::move(rows));
   }
+  if (definition_.id == "port_transport") {
+    // Port semantics: a connected, smooth road graph rather than a painted
+    // rectangular grid.  These are map reference roads; the task route uses
+    // the outbound and return branches below.
+    const auto add_road = [&markers](int id,
+                                     std::initializer_list<std::pair<double, double>> points) {
+      Marker road;
+      road.header.frame_id = "world";
+      road.ns = "port_road_network"; road.id = id;
+      road.type = Marker::LINE_STRIP; road.action = Marker::ADD;
+      road.pose.orientation.w = 1.0; road.scale.x = 0.22;
+      road.color.r = 0.42f; road.color.g = 0.52f;
+      road.color.b = 0.58f; road.color.a = 0.95f;
+      for (const auto& point : points)
+        road.points.push_back(ScenarioMap::make_point(point.first, point.second, 0.04));
+      markers.markers.push_back(std::move(road));
+    };
+    // Smooth, drivable road graph: two east/west yard roads, three north/south
+    // aisles and rounded links to the quay.  The task route follows one branch.
+    add_road(0, {{-30, -14}, {-10, -14}, {-8.5, -13.7}, {-7.3, -12.8},
+                 {-6.5, -11.5}, {-6, -9}, {-6, -5}, {-5.6, -3},
+                 {-4.5, -1.3}, {-3, 0}, {0, 1}, {4, 2}, {8, 3.5}, {11, 5.5}, {14, 7}});
+    add_road(1, {{-30, -18}, {-20, -18}, {-16, -17}, {-14, -14},
+                 {-11, -11}, {-8, -9}, {-4, -7}, {0, -6}, {4, -6}, {6, -5.5},
+                 {7.5, -4}, {8, -2}, {8, 2}, {8, 5}, {8, 8}, {8.5, 10},
+                 {9.5, 11.5}, {11, 12}, {13, 12}, {14.5, 11}, {15, 9.5},
+                 {14.8, 8}, {14, 7}});
+    add_road(2, {{-24, -20}, {-24, -14}, {-23.6, -12}, {-22.5, -10.5},
+                 {-21, -10}, {-18, -10}, {-16.5, -9.5}, {-16, -8}, {-16, 10}});
+    add_road(3, {{-12, -20}, {-12, -18}, {-11.5, -16.5}, {-10, -16},
+                 {-8, -16}, {-6.5, -15.5}, {-6, -14}, {-6, 10}});
+    add_road(4, {{2, -18}, {2, -14}, {2.4, -12}, {3.5, -10.5},
+                 {5, -10}, {8, -10}, {9.5, -9.5}, {10, -8}, {10, 10}});
+
+    Marker water;
+    water.header.frame_id = "world";
+    water.ns = "port_water"; water.id = 1;
+    water.type = Marker::CUBE; water.action = Marker::ADD;
+    water.pose.position.x = 24.0; water.pose.position.y = 4.0;
+    water.pose.position.z = -0.10; water.pose.orientation.w = 1.0;
+    water.scale.x = 18.0; water.scale.y = 26.0; water.scale.z = 0.08;
+    water.color.r = 0.05f; water.color.g = 0.20f; water.color.b = 0.32f; water.color.a = 0.85f;
+    markers.markers.push_back(std::move(water));
+
+    Marker quay;
+    quay.header.frame_id = "world";
+    quay.ns = "port_quay"; quay.id = 2;
+    quay.type = Marker::CUBE; quay.action = Marker::ADD;
+    quay.pose.position.x = 15.5; quay.pose.position.y = 4.0;
+    quay.pose.position.z = 0.02; quay.pose.orientation.w = 1.0;
+    quay.scale.x = 1.0; quay.scale.y = 20.0; quay.scale.z = 0.12;
+    quay.color.r = 0.55f; quay.color.g = 0.58f; quay.color.b = 0.60f; quay.color.a = 1.0f;
+    markers.markers.push_back(std::move(quay));
+
+    int container_id = 10;
+    for (int row = 0; row < 2; ++row) {
+      for (int col = 0; col < 4; ++col) {
+        Marker container;
+        container.header.frame_id = "world";
+        container.ns = "port_containers"; container.id = container_id++;
+        container.type = Marker::CUBE; container.action = Marker::ADD;
+        container.pose.position.x = -20.0 + col * 4.0;
+        container.pose.position.y = 2.0 + row * 4.0;
+        container.pose.position.z = 0.6; container.pose.orientation.w = 1.0;
+        container.scale.x = 3.2; container.scale.y = 1.6; container.scale.z = 1.2;
+        container.color.r = row == 0 ? 0.80f : 0.18f;
+        container.color.g = row == 0 ? 0.32f : 0.55f;
+        container.color.b = row == 0 ? 0.12f : 0.75f;
+        container.color.a = 1.0f;
+        markers.markers.push_back(std::move(container));
+      }
+    }
+  }
   return markers;
 }
 
@@ -413,6 +490,26 @@ MarkerArray DefinitionScenarioMap::build_extra_markers() const {
   // Mining owns explicit LOAD/DUMP/PARK markers in the ROS visualization
   // adapter.  Do not add the legacy generic first/last-route labels here.
   if (definition_.id == "mining_haul" || definition_.id == "agriculture_route") return markers;
+  if (definition_.id == "port_transport") {
+    const auto add_label = [&markers, this](int id, std::size_t index,
+                                             const char* text, float r, float g, float b) {
+      if (index >= definition_.reference_route.size()) return;
+      const auto& pose = definition_.reference_route[index];
+      Marker marker;
+      marker.header.frame_id = "world";
+      marker.ns = "port_zones"; marker.id = id;
+      marker.type = Marker::TEXT_VIEW_FACING; marker.action = Marker::ADD;
+      marker.pose.position = make_point(pose.x, pose.y, 1.8);
+      marker.pose.orientation.w = 1.0; marker.scale.z = 1.2;
+      marker.color.r = r; marker.color.g = g; marker.color.b = b; marker.color.a = 1.0f;
+      marker.text = text;
+      markers.markers.push_back(std::move(marker));
+    };
+    add_label(10, definition_.default_mission.load_index, "GATE", 0.2f, 0.8f, 1.0f);
+    add_label(20, definition_.default_mission.dump_index, "QUAY", 1.0f, 0.6f, 0.1f);
+    add_label(30, definition_.default_mission.parking_index, "PARK", 0.3f, 1.0f, 0.4f);
+    return markers;
+  }
   const char* labels[] = {"LOAD", "DUMP"};
   const std::size_t indices[] = {0, definition_.reference_route.size() - 1};
   for (int i = 0; i < 2; ++i) {

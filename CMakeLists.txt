@@ -68,6 +68,7 @@ add_library(sdc_runtime_core STATIC
   src/scenario/scenario_definition.cpp
   src/scenario/ring_scenario.cpp
   src/scenario/mining_haul_scenario.cpp
+  src/scenario/port_transport_scenario.cpp
   src/simulation/simulation_engine.cpp
   src/vehicle/simulated_vehicle.cpp
   src/replay/runtime_replay.cpp

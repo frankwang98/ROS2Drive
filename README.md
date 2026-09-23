@@ -159,13 +159,15 @@ reliable，RuntimeStatus/Fault 和静态地图使用 reliable + transient-local�
 source /opt/ros/jazzy/setup.bash   # 或 humble
 colcon build --packages-select self_driving_car_demo
 source install/setup.bash
-ros2 launch self_driving_car_demo autonomy.launch.py
+ros2 launch self_driving_car_demo autonomy.launch.py scenario:=ring_demo
 # 多车/隔离接口：话题位于 /car01/...
 ros2 launch self_driving_car_demo autonomy.launch.py robot_namespace:=car01
 # 真正切换到最小矿区运输场景（自动选 MiningHaul Profile）
 ros2 launch self_driving_car_demo autonomy.launch.py scenario:=mining_haul
 # 农业 Coverage Path MVP：6 条平行作业行 + U 型地头转弯
 ros2 launch self_driving_car_demo autonomy.launch.py scenario:=agriculture_route
+# 港口运输 MVP：平滑堆场道路网 → 闸口 → 岸桥 → 宽半径回场通道 → 停车区
+ros2 launch self_driving_car_demo autonomy.launch.py scenario:=port_transport
 # 场景和行为策略可交叉组合做测试
 ros2 launch self_driving_car_demo autonomy.launch.py \
   scenario:=mining_haul behavior_profile:=RingDemo

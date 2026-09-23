@@ -77,11 +77,6 @@ class HudPanel : public rviz_common::Panel {
   QLabel* action_label_;
   QLabel* distance_label_;
   QLabel* mode_label_;
-  QFrame* viewport_hud_{nullptr};
-  QLabel* viewport_title_{nullptr};
-  QLabel* viewport_speed_{nullptr};
-  QLabel* viewport_pose_{nullptr};
-  QLabel* viewport_stage_{nullptr};
 
   // ---- 控制按钮 ----
   QPushButton* start_button_;

@@ -64,7 +64,8 @@ PlanningResult ReferencePathPlanner::plan(const PlanningInput& in) {
   // definitions; ring-road planning has its own lane planner.  The weighted
   // pass preserves the endpoints while rounding each interior corner before
   // obstacle offsets and curvature are computed.
-  if (in.reference_path.size() <= 12 && out.trajectory.points.size() > 10) {
+  if ((config_.smooth_corners || in.reference_path.size() <= 12) &&
+      out.trajectory.points.size() > 10) {
     for (int pass = 0; pass < 5; ++pass) {
       auto smoothed = out.trajectory.points;
       for (std::size_t i = 2; i + 2 < out.trajectory.points.size(); ++i) {

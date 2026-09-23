@@ -11,16 +11,14 @@
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-#include <QGroupBox>
+#include <QGridLayout>
 #include <QString>
 
 #include <rviz_common/display_context.hpp>
-#include <rviz_common/view_manager.hpp>
-#include <rviz_common/render_panel.hpp>
 
 namespace sdc {
 
-static const char* kActionNames[] = {"加速", "巡航", "减速", "停车"};
+static const char* kActionNames[] = {"ACCEL", "CRUISE", "BRAKE", "STOP"};
 
 HudPanel::HudPanel(QWidget* parent)
     : rviz_common::Panel(parent)
@@ -36,44 +34,55 @@ HudPanel::HudPanel(QWidget* parent)
     , ui_timer_(nullptr)
 {
   auto* root = new QVBoxLayout(this);
+  root->setContentsMargins(6, 6, 6, 6);
+  root->setSpacing(6);
+  setStyleSheet(
+      "QWidget { background: #20252b; color: #dce7ef; font-size: 11px; }"
+      "QFrame#statusCard { background: #171c22; border: 1px solid #35424e; border-radius: 5px; }"
+      "QPushButton { background: #293744; border: 1px solid #455d70;"
+      " border-radius: 4px; padding: 4px 7px; min-height: 22px; }"
+      "QPushButton:hover { background: #365167; }"
+      "QPushButton#primary { background: #1f5f82; border-color: #4aa8d8; }"
+      "QLabel { color: #b9c8d3; }"
+      "QLabel#statusValue { color: #f3c969; font-weight: 600; }");
 
-  // 状态区
-  auto* state_box = new QGroupBox("小车状态", this);
-  auto* state_layout = new QVBoxLayout(state_box);
-  speed_label_ = new QLabel("速度: -- m/s", state_box);
-  action_label_ = new QLabel("行为: --", state_box);
-  distance_label_ = new QLabel("前方距离: -- m", state_box);
-  mode_label_ = new QLabel("驾驶模式: 自动", state_box);
-  state_layout->addWidget(speed_label_);
-  state_layout->addWidget(action_label_);
-  state_layout->addWidget(distance_label_);
-  state_layout->addWidget(mode_label_);
-  root->addWidget(state_box);
+  auto* status_card = new QFrame(this);
+  status_card->setObjectName("statusCard");
+  auto* state_layout = new QGridLayout(status_card);
+  state_layout->setContentsMargins(8, 7, 8, 7);
+  state_layout->setHorizontalSpacing(16);
+  state_layout->setVerticalSpacing(3);
+  speed_label_ = new QLabel("SPEED  -- m/s", status_card);
+  action_label_ = new QLabel("ACTION --", status_card);
+  distance_label_ = new QLabel("FRONT  -- m", status_card);
+  mode_label_ = new QLabel("MODE   AUTO", status_card);
+  speed_label_->setObjectName("statusValue");
+  action_label_->setObjectName("statusValue");
+  distance_label_->setObjectName("statusValue");
+  mode_label_->setObjectName("statusValue");
+  state_layout->addWidget(speed_label_, 0, 0);
+  state_layout->addWidget(action_label_, 0, 1);
+  state_layout->addWidget(distance_label_, 1, 0);
+  state_layout->addWidget(mode_label_, 1, 1);
+  root->addWidget(status_card);
 
-  // 驾驶模式区
-  auto* mode_box = new QGroupBox("驾驶模式", this);
-  auto* mode_layout = new QVBoxLayout(mode_box);
-  mode_button_ = new QPushButton("切换到手动 (WASD)", mode_box);
-  mode_layout->addWidget(mode_button_);
-  auto* hint = new QLabel("手动模式：W=前进  S=倒车  A=左转  D=右转", mode_box);
-  hint->setWordWrap(true);
-  mode_layout->addWidget(hint);
-  root->addWidget(mode_box);
+  mode_button_ = new QPushButton("MANUAL / WASD", this);
+  root->addWidget(mode_button_);
 
-  // 行驶控制区
-  auto* ctrl_box = new QGroupBox("行驶控制", this);
-  auto* ctrl_layout = new QVBoxLayout(ctrl_box);
   auto* ctrl_row = new QHBoxLayout();
-  start_button_ = new QPushButton("开始", ctrl_box);
-  pause_button_ = new QPushButton("暂停", ctrl_box);
-  clear_button_ = new QPushButton("清除轨迹", ctrl_box);
+  ctrl_row->setContentsMargins(0, 0, 0, 0);
+  ctrl_row->setSpacing(5);
+  start_button_ = new QPushButton("START", this);
+  start_button_->setObjectName("primary");
+  pause_button_ = new QPushButton("PAUSE", this);
+  clear_button_ = new QPushButton("CLEAR", this);
   ctrl_row->addWidget(start_button_);
   ctrl_row->addWidget(pause_button_);
   ctrl_row->addWidget(clear_button_);
-  ctrl_layout->addLayout(ctrl_row);
-  reset_button_ = new QPushButton("重置小车", ctrl_box);
-  ctrl_layout->addWidget(reset_button_);
-  root->addWidget(ctrl_box);
+  reset_button_ = new QPushButton("RESET", this);
+  ctrl_row->addWidget(reset_button_);
+  root->addLayout(ctrl_row);
+  root->addStretch(1);
 
   // 信号连接
   connect(start_button_, &QPushButton::clicked, this, &HudPanel::onStart);
@@ -86,11 +95,6 @@ HudPanel::HudPanel(QWidget* parent)
   setFocusPolicy(Qt::StrongFocus);
   setFocus();
 
-  // 速度大字体
-  QFont font = speed_label_->font();
-  font.setPointSize(14);
-  font.setBold(true);
-  speed_label_->setFont(font);
 }
 
 void HudPanel::onInitialize() {
@@ -98,34 +102,6 @@ void HudPanel::onInitialize() {
   auto ros_node_abs = getDisplayContext()->getRosNodeAbstraction().lock();
   if (!ros_node_abs) return;
   node_ = ros_node_abs->get_raw_node();
-
-  // Fixed-size HUD overlay attached to RViz's 3D render panel. It is a
-  // viewport child, not a world Marker, so zooming/panning never changes its
-  // position or typography.
-  if (auto* view_manager = getDisplayContext()->getViewManager()) {
-    if (auto* render_panel = view_manager->getRenderPanel()) {
-      viewport_hud_ = new QFrame(render_panel);
-      viewport_hud_->setGeometry(14, 14, 230, 116);
-      viewport_hud_->setStyleSheet(
-          "QFrame { background: rgba(18, 24, 32, 215); border: 1px solid #49b6ff;"
-          " border-radius: 10px; } QLabel { color: #eaf6ff; background: transparent; }");
-      auto* layout = new QVBoxLayout(viewport_hud_);
-      layout->setContentsMargins(12, 8, 12, 8);
-      layout->setSpacing(1);
-      viewport_title_ = new QLabel("AUTONOMY  /  CAR01", viewport_hud_);
-      viewport_title_->setStyleSheet("color: #66d9ff; font-weight: 700; letter-spacing: 1px;");
-      viewport_speed_ = new QLabel("SPEED  -- m/s", viewport_hud_);
-      viewport_pose_ = new QLabel("POS    --  --  --", viewport_hud_);
-      viewport_stage_ = new QLabel("STAGE  TRANSIT", viewport_hud_);
-      viewport_stage_->setStyleSheet("color: #ffd166; font-weight: 700;");
-      layout->addWidget(viewport_title_);
-      layout->addWidget(viewport_speed_);
-      layout->addWidget(viewport_pose_);
-      layout->addWidget(viewport_stage_);
-      viewport_hud_->raise();
-      viewport_hud_->show();
-    }
-  }
 
   auto qos = rclcpp::QoS(10);
   speed_sub_ = node_->create_subscription<std_msgs::msg::Float64>(
@@ -175,8 +151,8 @@ void HudPanel::onOdometry(const nav_msgs::msg::Odometry::SharedPtr msg) {
 }
 void HudPanel::onMode(const std_msgs::msg::Int32::SharedPtr msg) {
   manual_ = (msg->data == 1);
-  mode_label_->setText(QString("驾驶模式: %1").arg(manual_ ? "手动 (WASD)" : "自动"));
-  mode_button_->setText(manual_ ? "切换到自动" : "切换到手动 (WASD)");
+  mode_label_->setText(manual_ ? "MODE   MANUAL" : "MODE   AUTO");
+  mode_button_->setText(manual_ ? "AUTO MODE" : "MANUAL / WASD");
   if (!manual_) {
     // 切回自动时松开全部键
     key_w_ = key_s_ = key_a_ = key_d_ = false;
@@ -186,28 +162,17 @@ void HudPanel::onMode(const std_msgs::msg::Int32::SharedPtr msg) {
 
 void HudPanel::onMissionStage(const std_msgs::msg::String::SharedPtr msg) {
   mission_stage_ = msg->data.empty() ? "UNKNOWN" : msg->data;
-  if (viewport_stage_)
-    viewport_stage_->setText(QString("STAGE  %1").arg(QString::fromStdString(mission_stage_)));
 }
 
 void HudPanel::onStatusTimer() {
-  if (speed_label_)  speed_label_->setText(QString("速度: %1 m/s").arg(speed_, 0, 'f', 1));
+  if (speed_label_)  speed_label_->setText(QString("SPEED  %1 m/s").arg(speed_, 0, 'f', 1));
   if (action_label_) {
-    const char* name = "未知";
+    const char* name = "UNKNOWN";
     if (action_id_ >= 0 && action_id_ <= 3) name = kActionNames[action_id_];
-    action_label_->setText(QString("行为: %1").arg(name));
+    action_label_->setText(QString("ACTION %1").arg(name));
   }
-  if (distance_label_) distance_label_->setText(QString("前方距离: %1 m").arg(distance_, 0, 'f', 1));
-  if (viewport_speed_) viewport_speed_->setText(QString("SPEED  %1 m/s").arg(speed_, 0, 'f', 1));
-  if (viewport_pose_) {
-    viewport_pose_->setText(QString("POS    %1  %2  %3")
-                                .arg(pose_x_, 0, 'f', 1)
-                                .arg(pose_y_, 0, 'f', 1)
-                                .arg(pose_z_, 0, 'f', 1));
-  }
-  if (viewport_stage_)
-    viewport_stage_->setText(QString("STAGE  %1").arg(QString::fromStdString(mission_stage_)));
-  if (pause_button_) pause_button_->setText(paused_ ? "继续" : "暂停");
+  if (distance_label_) distance_label_->setText(QString("FRONT  %1 m").arg(distance_, 0, 'f', 1));
+  if (pause_button_) pause_button_->setText(paused_ ? "RESUME" : "PAUSE");
 
   // 手动模式下持续发送指令（保证松开后自动回中）
   if (manual_) publishManualCmd();

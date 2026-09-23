@@ -10,7 +10,7 @@ CoveragePathPlanner::CoveragePathPlanner()
 
 CoveragePathPlanner::CoveragePathPlanner(Config config)
     : config_(config), dense_planner_(ReferencePathPlanner::Config{
-          config.spacing, config.horizon, config.obstacle_margin}) {}
+          config.spacing, config.horizon, config.obstacle_margin, false}) {}
 
 std::vector<domain::Pose2D> CoveragePathPlanner::build_rows() const {
   std::vector<domain::Pose2D> route;

@@ -80,6 +80,7 @@
 #include "scenario/ring_scenario.hpp"
 #include "scenario/mining_haul_scenario.hpp"
 #include "scenario/agriculture_route_scenario.hpp"
+#include "scenario/port_transport_scenario.hpp"
 
 using namespace std::chrono_literals;
 using namespace sdc;
@@ -133,7 +134,17 @@ static domain::FaultAction fault_action_from_string(const std::string& value) {
   throw std::invalid_argument("unknown safety policy action: " + value);
 }
 
-static const char* mission_stage_name(domain::MissionStage stage) {
+static const char* mission_stage_name(domain::MissionStage stage,
+                                      const std::string& scenario_id = "") {
+  if (scenario_id == "port_transport") {
+    switch (stage) {
+      case domain::MissionStage::kTransit: return "YARD_TRANSIT";
+      case domain::MissionStage::kLoad: return "GATE_WAIT";
+      case domain::MissionStage::kHaul: return "QUAY_TRANSIT";
+      case domain::MissionStage::kDump: return "QUAY_DOCK";
+      case domain::MissionStage::kReturn: return "RETURN";
+    }
+  }
   switch (stage) {
     case domain::MissionStage::kLoad: return "LOAD";
     case domain::MissionStage::kHaul: return "HAUL";
@@ -183,6 +194,9 @@ public:
     } else if (scenario_id == "agriculture_route") {
       scenario_definition_ = scenario::makeAgricultureRouteScenarioDefinition();
       map_ = std::make_unique<DefinitionScenarioMap>(scenario_definition_);
+    } else if (scenario_id == "port_transport") {
+      scenario_definition_ = scenario::makePortTransportScenarioDefinition();
+      map_ = std::make_unique<DefinitionScenarioMap>(scenario_definition_);
     } else {
       throw std::invalid_argument("unsupported scenario: " + scenario_id);
     }
@@ -196,14 +210,17 @@ public:
     planner_config.spacing = declare_parameter<double>("planner.spacing", 0.25);
     planner_config.horizon = declare_parameter<double>("planner.horizon", 30.0);
     planner_config.obstacle_margin = declare_parameter<double>("planner.obstacle_margin", 0.8);
+    planner_config.smooth_corners = scenario_id == "port_transport";
     control::PurePursuitController::Config controller_config;
     // The current VehicleRuntime consumes a dense reference trajectory, so
     // Pure Pursuit is the integrated controller.  Use a tighter lookahead for
     // the sparse, low-speed mining haul road; it prevents cutting corners.
     const double wheelbase_default = scenario_id == "mining_haul" ? 2.8 :
-                                     scenario_id == "agriculture_route" ? 2.2 : 2.0;
+                                     scenario_id == "agriculture_route" ? 2.2 :
+                                     scenario_id == "port_transport" ? 2.7 : 2.0;
     const double lookahead_default = scenario_id == "mining_haul" ? 0.8 :
-                                     scenario_id == "agriculture_route" ? 1.8 : 1.5;
+                                     scenario_id == "agriculture_route" ? 1.8 :
+                                     scenario_id == "port_transport" ? 1.2 : 1.5;
     const double lookahead_time_default = scenario_id == "mining_haul" ? 0.5 :
                                           scenario_id == "agriculture_route" ? 1.0 : 1.0;
     controller_config.wheelbase = declare_parameter<double>("controller.wheelbase", wheelbase_default);
@@ -627,7 +644,7 @@ private:
         if (simulation_.runtime().missions().current()) {
           std_msgs::msg::String stage_message;
           stage_message.data = mission_stage_name(
-              simulation_.runtime().missions().current()->stage);
+              simulation_.runtime().missions().current()->stage, scenario_definition_.id);
           mission_stage_pub_->publish(stage_message);
         }
       }
@@ -644,7 +661,8 @@ private:
                     "[%.1fs] mode=%-10s stage=%-7s speed=%.2f m/s front=%.2f m action=%-10s plan=%s safety=%d reason=%s",
                     sim_time_, mode_ == Mode::kManual ? "MANUAL" : "AUTONOMOUS",
                     simulation_.runtime().missions().current()
-                        ? mission_stage_name(simulation_.runtime().missions().current()->stage) : "NONE",
+                        ? mission_stage_name(simulation_.runtime().missions().current()->stage,
+                                             scenario_definition_.id) : "NONE",
                     simulation_.vehicle().speed(), last_front_dist_, action_name(last_action_),
                     last_planning_success_ ? "OK" : "FAILED", last_safety_action_,
                     last_planning_reason_.c_str());
@@ -920,31 +938,6 @@ private:
       m.pose.orientation.w = 1.0; m.scale.x = 0.08;
       m.color.r = 0; m.color.g = 0.8f; m.color.b = 1; m.color.a = 0.6f;
       m.points.assign(trail_.begin(), trail_.end());
-      ma.markers.push_back(m);
-    }
-    // 状态文本
-    {
-      visualization_msgs::msg::Marker m;
-      m.header.frame_id = world_frame_; m.header.stamp = now();
-      m.ns = "hud"; m.id = 0;
-      m.type = m.TEXT_VIEW_FACING; m.action = m.ADD;
-      // Keep the HUD compact and ASCII-only: RViz installations often lack a
-      // Chinese font, which previously rendered as clipped/garbled text.
-      // World-fixed HUD: visible in the RViz scene without requiring a panel
-      // plugin. Keep it away from the vehicle so it does not overlap the car.
-      m.pose.position.x = -34.0; m.pose.position.y = 34.0;
-      m.pose.position.z = 3.0;
-      m.scale.z = 0.75;
-      m.color.r = 0.85f; m.color.g = 0.95f; m.color.b = 1.0f; m.color.a = 1.0f;
-      char buf[200];
-      const double vehicle_z = scenario_height_at(cx, cy);
-      const char* stage = simulation_.runtime().missions().current()
-                              ? mission_stage_name(simulation_.runtime().missions().current()->stage)
-                              : "NONE";
-      std::snprintf(buf, sizeof(buf),
-                    "STAGE  %s\nPOS  %.1f  %.1f  %.1f\nSPD  %.1f m/s",
-                    stage, cx, cy, vehicle_z, simulation_.vehicle().speed());
-      m.text = buf;
       ma.markers.push_back(m);
     }
     live_pub_->publish(ma);
