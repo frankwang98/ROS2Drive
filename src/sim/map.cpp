@@ -338,14 +338,15 @@ MarkerArray DefinitionScenarioMap::build_road_markers() const {
   road.type = Marker::LINE_STRIP;
   road.action = Marker::ADD;
   road.pose.orientation.w = 1.0;
-  road.scale.x = 6.0;
-  road.color.r = 0.22f;
-  road.color.g = 0.22f;
-  road.color.b = 0.25f;
+  road.scale.x = definition_.id == "agriculture_route" ? 0.12 : 6.0;
+  road.color.r = definition_.id == "agriculture_route" ? 0.75f : 0.22f;
+  road.color.g = definition_.id == "agriculture_route" ? 0.65f : 0.22f;
+  road.color.b = definition_.id == "agriculture_route" ? 0.15f : 0.25f;
   road.color.a = 1.0f;
   for (const auto& pose : definition_.reference_route)
     road.points.push_back(make_point(pose.x, pose.y, 0.01));
-  markers.markers.push_back(road);
+  if (definition_.id != "agriculture_route")
+    markers.markers.push_back(road);
 
   Marker center = road;
   center.ns = "scenario_centerline";
@@ -356,7 +357,54 @@ MarkerArray DefinitionScenarioMap::build_road_markers() const {
   center.color.b = 0.1f;
   center.color.a = 0.9f;
   center.pose.position.z = 0.04;
-  markers.markers.push_back(std::move(center));
+  if (definition_.id != "agriculture_route")
+    markers.markers.push_back(std::move(center));
+  if (definition_.id == "agriculture_route") {
+    Marker field_surface;
+    field_surface.header.frame_id = "world";
+    field_surface.ns = "agriculture_field";
+    field_surface.id = 9;
+    field_surface.type = Marker::CUBE;
+    field_surface.action = Marker::ADD;
+    field_surface.pose.position.x = 0.0;
+    field_surface.pose.position.y = 0.0;
+    field_surface.pose.position.z = -0.08;
+    field_surface.pose.orientation.w = 1.0;
+    field_surface.scale.x = 42.0;
+    field_surface.scale.y = 32.0;
+    field_surface.scale.z = 0.1;
+    field_surface.color.r = 0.16f; field_surface.color.g = 0.23f;
+    field_surface.color.b = 0.12f; field_surface.color.a = 0.85f;
+    markers.markers.push_back(std::move(field_surface));
+    Marker field;
+    field.header.frame_id = "world";
+    field.ns = "agriculture_field";
+    field.id = 10;
+    field.type = Marker::LINE_STRIP;
+    field.action = Marker::ADD;
+    field.pose.orientation.w = 1.0;
+    field.scale.x = 0.18;
+    field.color.r = 0.35f; field.color.g = 0.75f; field.color.b = 0.25f; field.color.a = 0.9f;
+    field.points = {make_point(-21.0, -15.0, 0.06), make_point(21.0, -15.0, 0.06),
+                    make_point(21.0, 15.0, 0.06), make_point(-21.0, 15.0, 0.06),
+                    make_point(-21.0, -15.0, 0.06)};
+    markers.markers.push_back(std::move(field));
+    Marker rows;
+    rows.header.frame_id = "world";
+    rows.ns = "agriculture_rows";
+    rows.id = 11;
+    rows.type = Marker::LINE_LIST;
+    rows.action = Marker::ADD;
+    rows.pose.orientation.w = 1.0;
+    rows.scale.x = 0.07;
+    rows.color.r = 0.55f; rows.color.g = 0.45f; rows.color.b = 0.18f; rows.color.a = 0.8f;
+    for (int row = 0; row < 6; ++row) {
+      const double y = -12.5 + row * 5.0;
+      rows.points.push_back(make_point(-18.0, y, 0.07));
+      rows.points.push_back(make_point(18.0, y, 0.07));
+    }
+    markers.markers.push_back(std::move(rows));
+  }
   return markers;
 }
 
@@ -364,7 +412,7 @@ MarkerArray DefinitionScenarioMap::build_extra_markers() const {
   MarkerArray markers;
   // Mining owns explicit LOAD/DUMP/PARK markers in the ROS visualization
   // adapter.  Do not add the legacy generic first/last-route labels here.
-  if (definition_.id == "mining_haul") return markers;
+  if (definition_.id == "mining_haul" || definition_.id == "agriculture_route") return markers;
   const char* labels[] = {"LOAD", "DUMP"};
   const std::size_t indices[] = {0, definition_.reference_route.size() - 1};
   for (int i = 0; i < 2; ++i) {

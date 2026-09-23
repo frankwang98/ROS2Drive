@@ -72,7 +72,15 @@
 - [x] 修正局部窗口边缘避障 taper，以最近点为峰值中心，避免矿区轨迹出现尖角
 - [x] 修复普通环形/点到点任务误用装卸阶段索引，只有显式 `load < dump < parking` 才启用 staged mission
 - [ ] 实现 `port_transport` 最小场景：堆场→路口→岸桥交接点，支持路权/停车线和精准停靠任务
-- [ ] 实现 `agriculture_route` 最小场景：作业行路线、地头转弯和作业机具状态，保持人员/作物安全边界
+- [~] 已实现 `agriculture_route` MVP：无障碍矩形田地、6 条往复式作业行、简单 U 型地头转弯和停车收尾；农具状态与覆盖率统计待补
+- [x] 农业田地改为独立田块背景与细作业行显示，U 型地头改为多点半圆过渡，降低车辆转弯振荡
+- [x] 农业 MVP 根据车辆轴距/地头半径提高最大转角默认值，避免 U 型转弯因曲率不可达而跑偏
+- [x] 农业 MVP 速度上限恢复为 `1.0 m/s`，优先保证地头转弯稳定
+- [x] 收紧 CoveragePathPlanner 地头半径至 `2.0 m`，并将农业控制前视距离设为 `1.2 m`，减少掉头外扩
+- [x] 农业默认 BehaviorTree profile 与 `scene_driving.xml` 的 `AgricultureRoute` ID 对齐
+- [x] 农业自动选择 `CoveragePathPlanner`，运行时根据田块边界/行距生成往复式覆盖路线，不再依赖场景固定路线跟踪
+- [x] 农业 RViz 隐藏旧 reference route，仅显示 CoveragePathPlanner 的实际轨迹，避免视觉上误认为仍在跟踪固定路线
+- [x] 修复 `CoveragePathPlanner` 嵌套 Config 默认构造参数的 GCC 编译兼容性
 - [ ] 港口扩展：堆场/闸口/岸桥/充电位、交叉口路权、倒车/精准对接、作业区限速
 - [ ] 农业扩展：作业行生成、地头 U 型/回字转弯、机具状态、行间偏差和人员/牲畜安全区
 - [ ] 为装卸、会车/路权、精准停靠、作业行/地头转弯增加可复用 BT 业务子树，而非把场景逻辑写入 Runtime

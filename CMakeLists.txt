@@ -101,11 +101,13 @@ add_library(sdc_core STATIC
   src/sensor/distance_sensor.cpp
   src/decision/decision_maker.cpp
   src/control/motor_controller.cpp
+  src/planning/coverage_path_planner.cpp
   src/sim/obstacle_manager.cpp
   src/behavior_tree/behavior_tree_planner.cpp
   src/behavior_tree/behavior_tree_behavior.cpp
   src/sim/map.cpp
   src/car/car.cpp
+  src/scenario/agriculture_route_scenario.cpp
 )
 target_include_directories(sdc_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include

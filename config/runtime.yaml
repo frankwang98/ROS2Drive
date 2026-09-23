@@ -18,12 +18,17 @@
       spacing: 0.25
       horizon: 30.0
       obstacle_margin: 0.8
+    coverage:
+      row_spacing: 5.0
+      headland_radius: 2.0
     controller:
       type: auto
       wheelbase: 2.0
       minimum_lookahead: 1.5
+      agriculture_minimum_lookahead: 1.2
       lookahead_time: 1.0
       maximum_steering: 0.55
+      agriculture_maximum_steering: 0.80
     velocity:
       maximum_lateral_acceleration: 1.2
       maximum_acceleration: 1.0

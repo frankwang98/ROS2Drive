@@ -70,6 +70,7 @@
 #include "sim/map.hpp"
 #include "sim/obstacle_manager.hpp"
 #include "planning/reference_path_planner.hpp"
+#include "planning/coverage_path_planner.hpp"
 #include "planning/ring_lane_planner.hpp"
 #include "planning/legacy_planner_adapter.hpp"
 #include "control/legacy_controller_adapter.hpp"
@@ -78,6 +79,7 @@
 #include "ros/runtime_message_converter.hpp"
 #include "scenario/ring_scenario.hpp"
 #include "scenario/mining_haul_scenario.hpp"
+#include "scenario/agriculture_route_scenario.hpp"
 
 using namespace std::chrono_literals;
 using namespace sdc;
@@ -178,6 +180,9 @@ public:
     } else if (scenario_id == "mining_haul") {
       scenario_definition_ = scenario::makeMiningHaulScenarioDefinition();
       map_ = std::make_unique<DefinitionScenarioMap>(scenario_definition_);
+    } else if (scenario_id == "agriculture_route") {
+      scenario_definition_ = scenario::makeAgricultureRouteScenarioDefinition();
+      map_ = std::make_unique<DefinitionScenarioMap>(scenario_definition_);
     } else {
       throw std::invalid_argument("unsupported scenario: " + scenario_id);
     }
@@ -195,13 +200,30 @@ public:
     // The current VehicleRuntime consumes a dense reference trajectory, so
     // Pure Pursuit is the integrated controller.  Use a tighter lookahead for
     // the sparse, low-speed mining haul road; it prevents cutting corners.
-    const double wheelbase_default = scenario_id == "mining_haul" ? 2.8 : 2.0;
-    const double lookahead_default = scenario_id == "mining_haul" ? 0.8 : 1.5;
-    const double lookahead_time_default = scenario_id == "mining_haul" ? 0.5 : 1.0;
+    const double wheelbase_default = scenario_id == "mining_haul" ? 2.8 :
+                                     scenario_id == "agriculture_route" ? 2.2 : 2.0;
+    const double lookahead_default = scenario_id == "mining_haul" ? 0.8 :
+                                     scenario_id == "agriculture_route" ? 1.8 : 1.5;
+    const double lookahead_time_default = scenario_id == "mining_haul" ? 0.5 :
+                                          scenario_id == "agriculture_route" ? 1.0 : 1.0;
     controller_config.wheelbase = declare_parameter<double>("controller.wheelbase", wheelbase_default);
     controller_config.minimum_lookahead = declare_parameter<double>("controller.minimum_lookahead", lookahead_default);
+    if (scenario_id == "agriculture_route" && controller_config.minimum_lookahead >= 1.5) {
+      controller_config.minimum_lookahead = declare_parameter<double>(
+          "controller.agriculture_minimum_lookahead", 1.2);
+    } else {
+      declare_parameter<double>("controller.agriculture_minimum_lookahead", 1.2);
+    }
     controller_config.lookahead_time = declare_parameter<double>("controller.lookahead_time", lookahead_time_default);
-    controller_config.maximum_steering = declare_parameter<double>("controller.maximum_steering", 0.55);
+    const double maximum_steering_default = scenario_id == "agriculture_route" ? 0.80 : 0.55;
+    controller_config.maximum_steering = declare_parameter<double>(
+        "controller.maximum_steering", maximum_steering_default);
+    if (scenario_id == "agriculture_route" && controller_config.maximum_steering <= 0.55) {
+      controller_config.maximum_steering = declare_parameter<double>(
+          "controller.agriculture_maximum_steering", 0.80);
+    } else {
+      declare_parameter<double>("controller.agriculture_maximum_steering", 0.80);
+    }
     planning::VelocityPlanner::Config velocity_config;
     velocity_config.maximum_lateral_acceleration = declare_parameter<double>("velocity.maximum_lateral_acceleration", 1.2);
     velocity_config.maximum_acceleration = declare_parameter<double>("velocity.maximum_acceleration", 1.0);
@@ -252,15 +274,27 @@ public:
       simulation_.setBehaviorManager(std::move(behavior));
     }
     const std::string selected_planner = planner_type == "auto"
-                                             ? (scenario_id == "ring_demo" ? "ring_lane" : "reference_path")
+                                             ? (scenario_id == "ring_demo" ? "ring_lane" :
+                                                scenario_id == "agriculture_route" ? "coverage" : "reference_path")
                                              : planner_type;
     const std::string selected_controller = controller_type == "auto"
                                                  ? "pure_pursuit"
                                                  : controller_type;
+    RCLCPP_INFO(get_logger(), "Planner selected: %s", selected_planner.c_str());
     if (selected_planner == "ring_lane") {
       if (scenario_id != "ring_demo")
         throw std::invalid_argument("ring_lane planner requires scenario:=ring_demo");
       simulation_.setPlanner(std::make_unique<planning::RingLanePlanner>());
+    } else if (selected_planner == "coverage") {
+      if (scenario_id != "agriculture_route")
+        throw std::invalid_argument("coverage planner requires scenario:=agriculture_route");
+      planning::CoveragePathPlanner::Config coverage_config;
+      coverage_config.spacing = planner_config.spacing;
+      coverage_config.horizon = planner_config.horizon;
+      coverage_config.obstacle_margin = planner_config.obstacle_margin;
+      coverage_config.row_spacing = declare_parameter<double>("coverage.row_spacing", 5.0);
+      coverage_config.headland_radius = declare_parameter<double>("coverage.headland_radius", 2.0);
+      simulation_.setPlanner(std::make_unique<planning::CoveragePathPlanner>(coverage_config));
     } else if (selected_planner == "reference_path") {
       simulation_.setPlanner(std::make_unique<planning::ReferencePathPlanner>(planner_config));
     } else if (selected_planner == "lattice" || selected_planner == "em") {

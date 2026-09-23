@@ -164,6 +164,8 @@ ros2 launch self_driving_car_demo autonomy.launch.py
 ros2 launch self_driving_car_demo autonomy.launch.py robot_namespace:=car01
 # 真正切换到最小矿区运输场景（自动选 MiningHaul Profile）
 ros2 launch self_driving_car_demo autonomy.launch.py scenario:=mining_haul
+# 农业 Coverage Path MVP：6 条平行作业行 + U 型地头转弯
+ros2 launch self_driving_car_demo autonomy.launch.py scenario:=agriculture_route
 # 场景和行为策略可交叉组合做测试
 ros2 launch self_driving_car_demo autonomy.launch.py \
   scenario:=mining_haul behavior_profile:=RingDemo
@@ -210,6 +212,12 @@ src/ros2/                                          ROS 节点（待瘦身）
 ```
 
 ## 设计约束
+
+农业第一版 MVP 使用 `scenario:=agriculture_route`（行为树 profile 为 `AgricultureRoute`，自动选择 `CoveragePathPlanner`）：矩形田地、6 条平行作业行、奇偶行反向行驶、
+简单 U 型地头转弯和最终停车。CoveragePathPlanner 在运行时按田块边界、行距和地头半径生成牛耕式路径，农业 RViz 不再显示旧的固定参考路线，只显示田块、作业行和实际规划轨迹；当前不注入障碍物，先验证 Coverage Path 的完整覆盖闭环；后续再加入
+农具宽度、覆盖率、断点续作以及人员/牲畜安全区。当前农业 MVP 速度上限为 `1.0 m/s`，优先保证地头转弯稳定。
+农业 MVP 的地头转弯使用更大的最大转角（默认 `0.80 rad`），并将行距调整为 5.0 m、地头半径调整为 2.0 m、前视距离调整为 1.2 m，以减少掉头外扩；
+实车适配时应根据车辆轴距和实际最小转弯半径重新标定。
 
 1. 核心层不得 include ROS 消息。
 2. planner 不得知道圆环、矿区或农田；场景只提供路径和约束。
