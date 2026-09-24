@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "domain/autonomy_types.hpp"
+#include "scenario/road_network.hpp"
 
 namespace sdc::scenario {
 
@@ -19,11 +20,17 @@ struct VehicleConstraints {
 struct ScenarioDefinition {
   std::string id;
   domain::Pose2D initial_pose;
-  std::vector<domain::Pose2D> reference_route;
+  RoadNetwork road_network;
+  // Ordered lane IDs are the route contract.  Do not store a second copy of
+  // coordinates in Mission or RViz adapters.
+  std::vector<std::string> default_route_lane_ids;
   std::vector<domain::Obstacle> static_obstacles;
   domain::Mission default_mission;
   VehicleConstraints vehicle_constraints;
   std::string default_behavior_profile;
+
+  std::vector<domain::Pose2D> referenceRoute(std::string& reason) const;
+  domain::Mission materializeDefaultMission(std::string& reason) const;
 };
 
 // Validates the portable scenario contract before an adapter installs it.

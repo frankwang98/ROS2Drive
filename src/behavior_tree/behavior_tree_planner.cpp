@@ -5,7 +5,7 @@
 #include <exception>
 #include <vector>
 
-#include "decision/decision_maker.hpp"
+#include "legacy/decision/decision_maker.hpp"
 
 // ============================================================
 // BehaviorTree.CPP v3 依赖。

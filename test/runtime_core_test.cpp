@@ -11,6 +11,7 @@
 #include "safety/safety_manager.hpp"
 #include "scenario/ring_scenario.hpp"
 #include "scenario/mining_haul_scenario.hpp"
+#include "scenario/port_transport_scenario.hpp"
 #include "simulation/simulation_engine.hpp"
 
 namespace {
@@ -33,7 +34,8 @@ TEST(ScenarioDefinition, RingScenarioIsPortableAndValid) {
   EXPECT_EQ(definition.id, "ring_demo");
   EXPECT_EQ(definition.default_behavior_profile, "RingDemo");
   EXPECT_EQ(definition.default_mission.type, MissionType::kFollowRoute);
-  EXPECT_GT(definition.reference_route.size(), 100u);
+  const auto route = definition.referenceRoute(reason);
+  EXPECT_GT(route.size(), 100u);
   EXPECT_NEAR(definition.initial_pose.x, 26.0, 1e-9);
 }
 
@@ -44,12 +46,26 @@ TEST(ScenarioDefinition, MiningHaulChangesRouteObstaclesAndProfile) {
   EXPECT_EQ(definition.id, "mining_haul");
   EXPECT_EQ(definition.default_behavior_profile, "MiningHaul");
   EXPECT_EQ(definition.default_mission.type, MissionType::kFollowRoute);
-  EXPECT_GE(definition.reference_route.size(), 5u);
+  const auto route = definition.referenceRoute(reason);
+  EXPECT_GE(route.size(), 5u);
   EXPECT_FALSE(definition.static_obstacles.empty());
   EXPECT_LT(definition.vehicle_constraints.maximum_speed, 2.0);
   EXPECT_NEAR(definition.initial_pose.x, -42.0, 1e-9);
-  EXPECT_GT(definition.reference_route.back().z, definition.reference_route.front().z);
-  EXPECT_NE(definition.reference_route.front().x, definition.reference_route.back().x);
+  EXPECT_GT(route.back().z, route.front().z);
+  EXPECT_NE(route.front().x, route.back().x);
+}
+
+TEST(ScenarioDefinition, MissionRouteIsMaterializedFromRoadNetwork) {
+  const auto definition = sdc::scenario::makePortTransportScenarioDefinition();
+  std::string reason;
+  const auto route = definition.referenceRoute(reason);
+  const auto mission = definition.materializeDefaultMission(reason);
+  EXPECT_TRUE(reason.empty()) << reason;
+  ASSERT_FALSE(definition.road_network.lanes.empty());
+  EXPECT_EQ(definition.default_route_lane_ids.size(), 1u);
+  EXPECT_EQ(mission.route.size(), route.size());
+  EXPECT_EQ(mission.route.front().x, route.front().x);
+  EXPECT_EQ(mission.route.back().y, route.back().y);
 }
 
 TEST(MissionManager, ValidatesLifecycleAndPreemption) {

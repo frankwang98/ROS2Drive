@@ -1,4 +1,4 @@
-#include "sim/obstacle_manager.hpp"
+#include "adapters/simulation/obstacle_manager.hpp"
 
 #include <algorithm>
 #include <cmath>

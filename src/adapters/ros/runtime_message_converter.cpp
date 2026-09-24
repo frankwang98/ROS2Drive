@@ -1,4 +1,4 @@
-#include "ros/runtime_message_converter.hpp"
+#include "adapters/ros/runtime_message_converter.hpp"
 
 #include <cmath>
 #include <utility>

@@ -34,8 +34,9 @@ Mission / Route / Vehicle State / Obstacles
 - `planning/`：消费参考路径、车辆状态、障碍物，输出统一稠密轨迹。
 - `safety/`：检测超时、定位、规划、急停等故障，并覆盖不安全指令。
 - `behavior_tree/`：矿山、港口、农业、教学场景通过外部 XML 配置。
-- `ros2/`：唯一 ROS 边界；`sim/`：场景、传感器和车辆模型适配器。
-- `ros/`：独立 Domain→ROS typed message converter；`ros2/`：ROS 2 Node、Action、参数和发布订阅边界。两者不是两套 ROS 实现：前者是纯转换库，后者是唯一运行时 ROS 入口。
+- `adapters/ros/`：独立 Domain→ROS typed message converter、ROS 2 Node、Action、参数和发布订阅边界。
+- `adapters/visualization/`：RViz 地图 Marker 和可选 RViz Panel；`adapters/simulation/`：教学障碍物/旧仿真适配器。ROS-free 仿真循环仍位于 `simulation/`。
+- `legacy/`：旧单机 Demo、旧传感器/决策组件；正式 Runtime 不应新增对它的依赖。
 - `simulation/`：ROS-free 教学仿真执行器，组合车辆模型与同一个 Runtime；不包含地图绘制或 ROS 发布。
 - `scenario/`：ROS-free 场景合同，统一初始位姿、路线、障碍、默认 Mission、车辆约束和 Behavior Profile。
 - `vehicle/`：底盘边界；`VehicleInterface` 统一状态读取、控制执行和健康检查，仿真由 `SimulatedVehicle` 实现，真实 CAN/线控底盘实现相同接口。
@@ -55,6 +56,11 @@ RuntimeOutput output = runtime.step(now_s, dt_s);
 Waypoint = pose(x,y,yaw) + curvature + velocity
          + acceleration + relative_time
 ```
+
+场景几何采用单一 `RoadNetwork`：`Lane.centerline` 是地图绘制、路线解析和默认
+Mission 的唯一坐标来源；Mission 只保存有序 lane ID，运行前才 materialize 为稠密
+route。Runtime 当前保持 Planner → VelocityPlanner → Controller → SafetyManager 的稳定
+闭环；后续如需增加轨迹质量检查，应先在仿真回归中验证，不直接阻断现有场景。
 
 当前 `ReferencePathPlanner` 是场景无关基线；Lattice/EM 和 Stanley/LQR/MPC 已通过 Adapter 接入统一接口，但 Lattice/EM 仍是环道 Frenet 实验实现，不能宣称为通用场景规划器。默认先保证 Runtime 闭环稳定，再逐个完成算法的场景无关化。
 
@@ -100,8 +106,8 @@ Runtime。
 
 `behavior_profile` **不会切换地图**；它只选择行为策略，`auto` 使用当前
 场景的默认 Profile。`scenario` 才选择地图、初始位姿、Mission route、障碍物
-和场景约束。当前已支持 `ring_demo` 与最小 `mining_haul`；港口和农业
-场景仍待实现。`bt_tree_id` 仅作为 `behavior_profile` 的兼容别名保留。
+和场景约束。当前已支持 `ring_demo`、`mining_haul`、`port_transport` 与
+`agriculture_route`；`bt_tree_id` 仅作为 `behavior_profile` 的兼容别名保留。
 
 场景地基已开始迁移：`ScenarioDefinition` 和 `RingScenarioDefinition` 不依赖 ROS，
 环形默认位姿、闭合路线、FollowRoute Mission、车辆约束及默认
@@ -209,8 +215,9 @@ include|src/control/trajectory_controller.*        统一轨迹控制接口
 include|src/simulation/simulation_engine.*         ROS-free 仿真执行器
 include|src/vehicle/                               仿真/真实底盘适配边界
 config/behavior_trees/                             场景行为树
-include|src/{sim,behavior_tree,...}/               现有算法/教学适配器
-src/ros2/                                          ROS 节点（待瘦身）
+include|src/adapters/{ros,simulation,visualization}/ ROS/教学仿真/RViz 适配器
+include|src/legacy/                                旧单机 Demo 与兼容组件
+src/apps/                                          可执行入口点
 ```
 
 ## 设计约束
@@ -233,7 +240,8 @@ src/ros2/                                          ROS 节点（待瘦身）
 构建系统已将 `sdc_runtime_core` 与依赖 ROS visualization 的环道教学
 adapter `sdc_core` 分离。前者包含 domain、mission、planning、velocity、control、
 safety、vehicle model 与 SimulationEngine，可独立进行纯 C++ 单元测试。
-带圆环假设的 legacy planner/controller/AutoDriver 不属于任一正式构建目标。
+带圆环假设的 legacy planner/controller 不属于跨场景默认算法；旧 AutoDriver 与未接入
+构建的独立 controller node 已删除，避免形成第二套运行链路。
 
 `test/runtime_core_test.cpp` 当前覆盖 Mission 校验/抢占/超时、非环形折线
 稠密规划、动态障碍局部绕行、正常非闭合路线闭环、安全停车、受控安全恢复、
@@ -266,10 +274,10 @@ bash scripts/format_cpp.sh
 SimulationEngine 可通过 `enableRecording(true)` 开启内存记录。Mission 定义需在回放开始
 前由测试或工具显式安装，ROS 录制控制接口和自动误差阈值仍待实现。
 
-`SimulationEngine` 负责仿真时间、Ackermann 车辆模型、手动输入和 Runtime 控制指令执行。`ring_road_sim_node` 已通过该边界运行，不再直接持有 `VehicleRuntime`、车辆模型或旧 `AutoDriver`。RViz Marker/LIDAR 生成仍在节点内，下一步继续抽成独立 Visualization Adapter。
+`SimulationEngine` 负责仿真时间、Ackermann 车辆模型、手动输入和 Runtime 控制指令执行。`ring_road_sim_node` 已通过该边界运行，不再直接持有 `VehicleRuntime` 或车辆模型。RViz Marker/LIDAR 生成仍在节点内，下一步继续抽成独立 Visualization Adapter。
 
 仿真引擎提供定位和感知可用性故障注入，用于可重复验证 watchdog 与安全停车。
-接口冲突的旧 `car_controller_node.cpp` 已从构建和安装目标移除，源码暂留作历史参考，
+接口冲突的旧 `car_controller_node.cpp` 已删除，
 不会再与正式 Runtime 同时发布控制结果。
 当前 `VehicleRuntime` 默认组合为 `ReferencePathPlanner + MPC`：两者都接入统一
 `Planner`/`Controller` 接口并直接消费稠密 waypoint。Pure Pursuit、Stanley、LQR 也可通过

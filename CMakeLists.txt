@@ -65,10 +65,12 @@ endif()
 
 # ---- 场景无关 Runtime 核心（严格不依赖 ROS）----
 add_library(sdc_runtime_core STATIC
+  src/scenario/road_network.cpp
   src/scenario/scenario_definition.cpp
   src/scenario/ring_scenario.cpp
   src/scenario/mining_haul_scenario.cpp
   src/scenario/port_transport_scenario.cpp
+  src/scenario/agriculture_route_scenario.cpp
   src/simulation/simulation_engine.cpp
   src/vehicle/simulated_vehicle.cpp
   src/replay/runtime_replay.cpp
@@ -82,6 +84,7 @@ add_library(sdc_runtime_core STATIC
   src/safety/fault_manager.cpp
   src/safety/safety_manager.cpp
   src/planning/reference_path_planner.cpp
+  src/planning/coverage_path_planner.cpp
   src/planning/ring_lane_planner.cpp
   src/planning/lattice_planner.cpp
   src/planning/em_planner.cpp
@@ -95,20 +98,18 @@ target_include_directories(sdc_runtime_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# ---- 默认教学场景 adapter；map/visualization 仍依赖 ROS ----
-# 旧 Lattice/EM/AutoDriver 及旧横向控制器带有环道几何假设，
+# ---- ROS / visualization adapters for the teaching scenarios ----
+# 旧 Lattice/EM 及旧横向控制器带有环道几何假设，
 # 仅保留源码供对照，不进入正式 Runtime 或默认产物。
 add_library(sdc_core STATIC
-  src/sensor/distance_sensor.cpp
-  src/decision/decision_maker.cpp
+  src/legacy/sensor/distance_sensor.cpp
+  src/legacy/decision/decision_maker.cpp
   src/control/motor_controller.cpp
-  src/planning/coverage_path_planner.cpp
-  src/sim/obstacle_manager.cpp
+  src/adapters/simulation/obstacle_manager.cpp
   src/behavior_tree/behavior_tree_planner.cpp
   src/behavior_tree/behavior_tree_behavior.cpp
-  src/sim/map.cpp
-  src/car/car.cpp
-  src/scenario/agriculture_route_scenario.cpp
+  src/adapters/visualization/map.cpp
+  src/legacy/car/car.cpp
 )
 target_include_directories(sdc_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -136,8 +137,8 @@ endif()
 
 # ---- 旧版单机 demo（保留，方便对比）----
 add_executable(demo_car
-  src/main.cpp
-  src/car/car.cpp
+  src/apps/demo_car_main.cpp
+  src/legacy/car/car.cpp
 )
 target_link_libraries(demo_car sdc_core)
 target_include_directories(demo_car PRIVATE
@@ -146,10 +147,10 @@ target_include_directories(demo_car PRIVATE
 
 # ---- ROS2 仿真 + 可视化节点 ----
 add_executable(ring_road_sim
-  src/ros2/ring_road_sim_node.cpp
+  src/adapters/ros/nodes/ring_road_sim_node.cpp
 )
 rosidl_get_typesupport_target(sdc_rosidl_typesupport ${PROJECT_NAME} "rosidl_typesupport_cpp")
-add_library(sdc_ros_adapter STATIC src/ros/runtime_message_converter.cpp)
+add_library(sdc_ros_adapter STATIC src/adapters/ros/runtime_message_converter.cpp)
 add_dependencies(sdc_ros_adapter ${PROJECT_NAME}__rosidl_generator_cpp)
 target_include_directories(sdc_ros_adapter PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(sdc_ros_adapter sdc_runtime_core ${sdc_rosidl_typesupport})
@@ -176,10 +177,10 @@ target_include_directories(ring_road_sim PRIVATE
 if(SDC_BUILD_RVIZ_PANEL)
   find_package(pluginlib REQUIRED)
   qt5_wrap_cpp(sdc_hud_panel_MOC
-    src/rviz/sdc_hud_panel.hpp
+    src/adapters/visualization/rviz/sdc_hud_panel.hpp
   )
   add_library(sdc_hud_panel SHARED
-    src/rviz/sdc_hud_panel.cpp
+    src/adapters/visualization/rviz/sdc_hud_panel.cpp
     ${sdc_hud_panel_MOC}
   )
   target_link_libraries(sdc_hud_panel
@@ -201,11 +202,11 @@ if(SDC_BUILD_RVIZ_PANEL)
     LIBRARY DESTINATION lib
     RUNTIME DESTINATION bin
   )
-  install(FILES src/rviz/plugin_description.xml
+  install(FILES src/adapters/visualization/rviz/plugin_description.xml
     DESTINATION share/${PROJECT_NAME}
   )
   pluginlib_export_plugin_description_file(rviz_common
-    src/rviz/plugin_description.xml
+    src/adapters/visualization/rviz/plugin_description.xml
   )
 endif()
 

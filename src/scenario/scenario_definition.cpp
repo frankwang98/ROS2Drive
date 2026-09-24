@@ -4,6 +4,16 @@
 
 namespace sdc::scenario {
 
+std::vector<domain::Pose2D> ScenarioDefinition::referenceRoute(std::string& reason) const {
+  return road_network.materializeRoute(default_route_lane_ids, reason);
+}
+
+domain::Mission ScenarioDefinition::materializeDefaultMission(std::string& reason) const {
+  domain::Mission mission = default_mission;
+  mission.route = referenceRoute(reason);
+  return mission;
+}
+
 bool validate(const ScenarioDefinition& definition, std::string& reason) {
   if (definition.id.empty()) {
     reason = "scenario_id_empty";
@@ -13,8 +23,10 @@ bool validate(const ScenarioDefinition& definition, std::string& reason) {
     reason = "behavior_profile_empty";
     return false;
   }
-  if (definition.reference_route.size() < 2) {
-    reason = "reference_route_too_short";
+  const auto route = definition.referenceRoute(reason);
+  if (route.size() < 2) {
+    if (reason.empty())
+      reason = "reference_route_too_short";
     return false;
   }
   if (!std::isfinite(definition.initial_pose.x) || !std::isfinite(definition.initial_pose.y) ||
@@ -22,7 +34,7 @@ bool validate(const ScenarioDefinition& definition, std::string& reason) {
     reason = "invalid_initial_pose";
     return false;
   }
-  for (const auto& pose : definition.reference_route) {
+  for (const auto& pose : route) {
     if (!std::isfinite(pose.x) || !std::isfinite(pose.y) || !std::isfinite(pose.yaw)) {
       reason = "invalid_reference_route";
       return false;
@@ -40,18 +52,10 @@ bool validate(const ScenarioDefinition& definition, std::string& reason) {
     reason = "invalid_vehicle_constraints";
     return false;
   }
-  if (definition.default_mission.route.size() != definition.reference_route.size()) {
+  const auto mission = definition.materializeDefaultMission(reason);
+  if (mission.route.size() != route.size()) {
     reason = "default_mission_route_mismatch";
     return false;
-  }
-  for (std::size_t i = 0; i < definition.reference_route.size(); ++i) {
-    const auto& mission_pose = definition.default_mission.route[i];
-    const auto& reference_pose = definition.reference_route[i];
-    if (mission_pose.x != reference_pose.x || mission_pose.y != reference_pose.y ||
-        mission_pose.yaw != reference_pose.yaw) {
-      reason = "default_mission_route_mismatch";
-      return false;
-    }
   }
   reason.clear();
   return true;

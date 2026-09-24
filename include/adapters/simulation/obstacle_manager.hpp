@@ -1,10 +1,10 @@
-#ifndef SELF_DRIVING_CAR_SIM_OBSTACLE_MANAGER_HPP
-#define SELF_DRIVING_CAR_SIM_OBSTACLE_MANAGER_HPP
+#ifndef SELF_DRIVING_CAR_ADAPTERS_SIMULATION_OBSTACLE_MANAGER_HPP
+#define SELF_DRIVING_CAR_ADAPTERS_SIMULATION_OBSTACLE_MANAGER_HPP
 
 #include <random>
 #include <vector>
 
-#include "sim/scene_types.hpp"
+#include "domain/geometry.hpp"
 
 namespace sdc {
 
@@ -65,4 +65,4 @@ class ObstacleManager {
 
 }  // namespace sdc
 
-#endif  // SELF_DRIVING_CAR_SIM_OBSTACLE_MANAGER_HPP
+#endif  // SELF_DRIVING_CAR_ADAPTERS_SIMULATION_OBSTACLE_MANAGER_HPP

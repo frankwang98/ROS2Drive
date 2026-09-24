@@ -6,21 +6,24 @@ ScenarioDefinition makeMiningHaulScenarioDefinition() {
   ScenarioDefinition definition;
   definition.id = "mining_haul";
   definition.initial_pose = {-42.0, -22.0, 0.0};
-  definition.reference_route = {{-42.0, -22.0, 0.0, 0.0},
-                                {-38.0, -20.0, 0.0, 0.2},
-                                {-34.0, -18.0, 0.0, 0.5},
-                                {-30.0, -16.0, 0.0, 1.0},
-                                {-24.0, -13.0, 0.1, 1.6},
-                                {-16.0, -10.0, 0.2, 2.2},
-                                {-8.0, -7.0, 0.3, 2.8},
-                                {0.0, -3.0, 0.4, 3.4},
-                                {8.0, 2.0, 0.5, 4.0},
-                                {16.0, 8.0, 0.7, 4.8},
-                                {19.0, 11.0, 1.0, 5.2},
-                                {20.0, 15.0, 1.3, 5.6},
-                                {18.0, 19.0, 1.7, 6.0},
-                                {14.0, 22.0, 2.0, 6.4},
-                                {9.0, 24.0, 2.2, 6.8}};
+  definition.road_network.lanes = {{"haul_road",
+                                    {{-42.0, -22.0, 0.0, 0.0},
+                                     {-38.0, -20.0, 0.0, 0.2},
+                                     {-34.0, -18.0, 0.0, 0.5},
+                                     {-30.0, -16.0, 0.0, 1.0},
+                                     {-24.0, -13.0, 0.1, 1.6},
+                                     {-16.0, -10.0, 0.2, 2.2},
+                                     {-8.0, -7.0, 0.3, 2.8},
+                                     {0.0, -3.0, 0.4, 3.4},
+                                     {8.0, 2.0, 0.5, 4.0},
+                                     {16.0, 8.0, 0.7, 4.8},
+                                     {19.0, 11.0, 1.0, 5.2},
+                                     {20.0, 15.0, 1.3, 5.6},
+                                     {18.0, 19.0, 1.7, 6.0},
+                                     {14.0, 22.0, 2.0, 6.4},
+                                     {9.0, 24.0, 2.2, 6.8}},
+                                    1.5}};
+  definition.default_route_lane_ids = {"haul_road"};
 
   // Baseline mining route intentionally has no obstacles.  The first
   // acceptance step isolates route tracking and the LOAD/HAUL/DUMP/RETURN
@@ -33,7 +36,6 @@ ScenarioDefinition makeMiningHaulScenarioDefinition() {
   definition.vehicle_constraints.wheelbase = 2.8;
   definition.default_mission.id = "mining-haul";
   definition.default_mission.type = domain::MissionType::kFollowRoute;
-  definition.default_mission.route = definition.reference_route;
   definition.default_mission.speed_limit = definition.vehicle_constraints.maximum_speed;
   definition.default_mission.stage = domain::MissionStage::kTransit;
   definition.default_mission.payload = domain::PayloadState::kEmpty;

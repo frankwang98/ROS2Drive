@@ -1,4 +1,4 @@
-#include "sim/map.hpp"
+#include "adapters/visualization/map.hpp"
 
 #include "scenario/ring_scenario.hpp"
 
@@ -107,7 +107,8 @@ bool RingMap::goal_reached(const CarState& /*car*/) const {
 }
 
 std::vector<domain::Pose2D> RingMap::reference_path() const {
-  return scenario::makeRingScenarioDefinition(radius_, segments_).reference_route;
+  std::string reason;
+  return scenario::makeRingScenarioDefinition(radius_, segments_).referenceRoute(reason);
 }
 
 // ---- 静态路况障碍物（slalom 桩桶 / 窄门 / 路障） ----
@@ -339,13 +340,26 @@ DefinitionScenarioMap::DefinitionScenarioMap(scenario::ScenarioDefinition defini
     throw std::invalid_argument("invalid scenario definition: " + reason);
 }
 
+std::vector<domain::Pose2D> DefinitionScenarioMap::route() const {
+  std::string reason;
+  auto route = definition_.referenceRoute(reason);
+  if (!reason.empty())
+    throw std::logic_error("invalid scenario route: " + reason);
+  return route;
+}
+
+std::vector<domain::Pose2D> DefinitionScenarioMap::reference_path() const {
+  return route();
+}
+
 void DefinitionScenarioMap::reset(CarState& car) const {
   const auto& pose = definition_.initial_pose;
   car.reset(pose.x, pose.y, pose.yaw, 0.0, 0.0);
 }
 
 Vec2 DefinitionScenarioMap::goal_point(double) const {
-  const auto& pose = definition_.reference_route.back();
+  const auto reference_route = route();
+  const auto& pose = reference_route.back();
   return {pose.x, pose.y};
 }
 
@@ -363,6 +377,7 @@ std::vector<Obstacle> DefinitionScenarioMap::to_obstacles() const {
 }
 
 MarkerArray DefinitionScenarioMap::build_road_markers() const {
+  const auto reference_route = route();
   MarkerArray markers;
   Marker road;
   road.header.frame_id = "world";
@@ -378,7 +393,7 @@ MarkerArray DefinitionScenarioMap::build_road_markers() const {
   road.color.g = agriculture ? 0.65f : defined_road ? 0.14f : 0.22f;
   road.color.b = agriculture ? 0.15f : defined_road ? 0.17f : 0.25f;
   road.color.a = 1.0f;
-  for (const auto& pose : definition_.reference_route)
+  for (const auto& pose : reference_route)
     road.points.push_back(make_point(pose.x, pose.y, 0.01));
   if (definition_.id != "agriculture_route" && !defined_road)
     markers.markers.push_back(road);
@@ -598,9 +613,10 @@ MarkerArray DefinitionScenarioMap::build_extra_markers() const {
   if (definition_.id == "port_transport") {
     const auto add_label =
         [&markers, this](int id, std::size_t index, const char* text, float r, float g, float b) {
-          if (index >= definition_.reference_route.size())
+          const auto reference_route = route();
+          if (index >= reference_route.size())
             return;
-          const auto& pose = definition_.reference_route[index];
+          const auto& pose = reference_route[index];
           Marker marker;
           marker.header.frame_id = "world";
           marker.ns = "port_zones";
@@ -623,9 +639,10 @@ MarkerArray DefinitionScenarioMap::build_extra_markers() const {
     return markers;
   }
   const char* labels[] = {"LOAD", "DUMP"};
-  const std::size_t indices[] = {0, definition_.reference_route.size() - 1};
+  const auto reference_route = route();
+  const std::size_t indices[] = {0, reference_route.size() - 1};
   for (int i = 0; i < 2; ++i) {
-    const auto& pose = definition_.reference_route[indices[i]];
+    const auto& pose = reference_route[indices[i]];
     Marker marker;
     marker.header.frame_id = "world";
     marker.ns = "scenario_zones";

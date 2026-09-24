@@ -67,8 +67,8 @@
 #include "self_driving_car_demo/msg/trajectory.hpp"
 #include "self_driving_car_demo/action/execute_mission.hpp"
 
-#include "sim/map.hpp"
-#include "sim/obstacle_manager.hpp"
+#include "adapters/visualization/map.hpp"
+#include "adapters/simulation/obstacle_manager.hpp"
 #include "planning/reference_path_planner.hpp"
 #include "planning/coverage_path_planner.hpp"
 #include "planning/ring_lane_planner.hpp"
@@ -76,7 +76,7 @@
 #include "control/legacy_controller_adapter.hpp"
 #include "simulation/simulation_engine.hpp"
 #include "behavior_tree/behavior_tree_behavior.hpp"
-#include "ros/runtime_message_converter.hpp"
+#include "adapters/ros/runtime_message_converter.hpp"
 #include "scenario/ring_scenario.hpp"
 #include "scenario/mining_haul_scenario.hpp"
 #include "scenario/agriculture_route_scenario.hpp"
@@ -624,7 +624,10 @@ class RingRoadSimNode : public rclcpp::Node {
   void install_default_scenario_mission() {
     const auto& pose = scenario_definition_.initial_pose;
     simulation_.reset(pose.x, pose.y, pose.yaw);
-    auto mission = scenario_definition_.default_mission;
+    std::string reason;
+    auto mission = scenario_definition_.materializeDefaultMission(reason);
+    if (!reason.empty())
+      throw std::runtime_error("failed to materialize scenario mission: " + reason);
     mission.id += "-" + std::to_string(++scenario_mission_sequence_);
     if (!simulation_.setMission(std::move(mission)))
       throw std::runtime_error("failed to install default scenario mission");
@@ -778,8 +781,16 @@ class RingRoadSimNode : public rclcpp::Node {
     return min_d;
   }
 
+  std::vector<domain::Pose2D> scenario_route() const {
+    std::string reason;
+    auto route = scenario_definition_.referenceRoute(reason);
+    if (!reason.empty())
+      throw std::logic_error("invalid scenario road network: " + reason);
+    return route;
+  }
+
   double scenario_height_at(double x, double y) const {
-    const auto& route = scenario_definition_.reference_route;
+    const auto route = scenario_route();
     if (route.empty())
       return 0.0;
     double best_distance = std::numeric_limits<double>::max();
@@ -1091,16 +1102,17 @@ class RingRoadSimNode : public rclcpp::Node {
 
   // ========== 静态道路重发 ==========
   void add_mission_zone_markers() {
-    if (scenario_definition_.id != "mining_haul" || scenario_definition_.reference_route.size() < 6)
+    const auto route = scenario_route();
+    if (scenario_definition_.id != "mining_haul" || route.size() < 6)
       return;
-    const auto add_zone = [this](const char* ns,
-                                 int id,
-                                 std::size_t route_index,
-                                 const char* label,
-                                 float r,
-                                 float g,
-                                 float b) {
-      const auto& p = scenario_definition_.reference_route[route_index];
+    const auto add_zone = [this, &route](const char* ns,
+                                         int id,
+                                         std::size_t route_index,
+                                         const char* label,
+                                         float r,
+                                         float g,
+                                         float b) {
+      const auto& p = route[route_index];
       visualization_msgs::msg::Marker zone;
       zone.header.frame_id = world_frame_;
       zone.ns = ns;

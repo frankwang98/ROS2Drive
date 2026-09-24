@@ -3,7 +3,7 @@
 
 #include <vector>
 
-#include "sim/scene_types.hpp"
+#include "domain/geometry.hpp"
 
 namespace sdc {
 

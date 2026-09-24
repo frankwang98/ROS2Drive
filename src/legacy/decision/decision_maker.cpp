@@ -1,4 +1,4 @@
-#include "decision/decision_maker.hpp"
+#include "legacy/decision/decision_maker.hpp"
 
 namespace sdc {
 

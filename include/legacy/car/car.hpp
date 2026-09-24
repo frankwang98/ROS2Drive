@@ -2,8 +2,8 @@
 #define SELF_DRIVING_CAR_CAR_CAR_HPP
 
 #include "control/motor_controller.hpp"
-#include "decision/decision_maker.hpp"
-#include "sensor/distance_sensor.hpp"
+#include "legacy/decision/decision_maker.hpp"
+#include "legacy/sensor/distance_sensor.hpp"
 
 namespace sdc {
 

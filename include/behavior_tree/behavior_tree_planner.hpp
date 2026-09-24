@@ -3,7 +3,7 @@
 
 #include <string>
 
-#include "decision/decision_maker.hpp"
+#include "legacy/decision/decision_maker.hpp"
 
 // 本模块基于 BehaviorTree.CPP v3 实现「基础行为切换」。
 // 通过一棵可读的 XML 行为树，把「前方障碍物距离」映射为小车的基础行为

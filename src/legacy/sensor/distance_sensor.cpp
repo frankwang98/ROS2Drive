@@ -1,4 +1,4 @@
-#include "sensor/distance_sensor.hpp"
+#include "legacy/sensor/distance_sensor.hpp"
 
 #include <algorithm>
 #include <cmath>

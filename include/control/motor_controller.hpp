@@ -1,7 +1,7 @@
 #ifndef SELF_DRIVING_CAR_CONTROL_MOTOR_CONTROLLER_HPP
 #define SELF_DRIVING_CAR_CONTROL_MOTOR_CONTROLLER_HPP
 
-#include "decision/decision_maker.hpp"
+#include "legacy/decision/decision_maker.hpp"
 
 namespace sdc {
 

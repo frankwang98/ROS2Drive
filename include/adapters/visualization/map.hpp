@@ -1,5 +1,5 @@
-#ifndef SELF_DRIVING_CAR_SIM_MAP_HPP
-#define SELF_DRIVING_CAR_SIM_MAP_HPP
+#ifndef SELF_DRIVING_CAR_ADAPTERS_VISUALIZATION_MAP_HPP
+#define SELF_DRIVING_CAR_ADAPTERS_VISUALIZATION_MAP_HPP
 
 #include <memory>
 #include <string>
@@ -11,7 +11,7 @@
 
 #include "model/ackermann_model.hpp"
 #include "domain/autonomy_types.hpp"
-#include "sim/scene_types.hpp"
+#include "domain/geometry.hpp"
 #include "scenario/scenario_definition.hpp"
 
 namespace sdc {
@@ -138,11 +138,10 @@ class DefinitionScenarioMap final : public ScenarioMap {
   Vec2 goal_point(double progress = 0.0) const override;
   bool goal_reached(const CarState& car) const override;
   std::vector<Obstacle> to_obstacles() const override;
-  std::vector<domain::Pose2D> reference_path() const override {
-    return definition_.reference_route;
-  }
+  std::vector<domain::Pose2D> reference_path() const override;
 
  private:
+  std::vector<domain::Pose2D> route() const;
   scenario::ScenarioDefinition definition_;
 };
 
@@ -151,4 +150,4 @@ std::unique_ptr<ScenarioMap> create_map(MapType t);
 
 }  // namespace sdc
 
-#endif  // SELF_DRIVING_CAR_SIM_MAP_HPP
+#endif  // SELF_DRIVING_CAR_ADAPTERS_VISUALIZATION_MAP_HPP

@@ -11,6 +11,7 @@ RosAdapter (namespace, QoS, timestamp, message conversion)
       │ domain objects
 VehicleRuntime
 ├── MissionManager       task validation and lifecycle
+├── RoadNetwork          lane geometry and mission route materialization
 ├── BehaviorManager      scenario policy / external BT XML
 ├── Planner              geometric dense path
 ├── VelocityPlanner      curvature and longitudinal limits
@@ -33,6 +34,7 @@ sequenceDiagram
   participant A as ROS/Simulation Adapter
   participant R as VehicleRuntime
   participant M as MissionManager
+  participant N as RoadNetwork
   participant B as BehaviorManager
   participant P as Planner
   participant V as VelocityPlanner
@@ -40,6 +42,7 @@ sequenceDiagram
   participant S as SafetyManager
   A->>R: vehicle state + obstacles + timestamp
   R->>M: validate lifecycle/timeout
+  M->>N: lane IDs -> reference route
   R->>B: mission + state + obstacles
   B-->>R: behavior speed/stop constraint
   R->>P: PlanningInput(reference path)
@@ -65,7 +68,7 @@ sequenceDiagram
 
 ## Extension rules
 
-1. A new scenario supplies route, constraints and Behavior XML; it does not fork Runtime.
+1. A new scenario supplies a RoadNetwork, lane-ID Mission, constraints and Behavior XML; it does not fork Runtime.
 2. A new planner implements `planning::Planner` and returns the common trajectory.
 3. A new controller implements `control::Controller` and consumes that trajectory.
 4. A real chassis implements `vehicle::VehicleInterface`; hardware ESTOP remains independent.

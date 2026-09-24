@@ -21,11 +21,11 @@
 - [~] `ring_road_sim_node` 已接入 ROS-free `SimulationEngine`；Visualization Adapter 待拆分
 - [x] 环形道路生成通用 `Mission.route`
 - [x] 默认闭环切换至 `VehicleRuntime`；legacy 算法源码隔离保留，不再进入正式控制面
-- [x] 旧 Lattice/EM/AutoDriver 与环道几何类型解耦，并从默认构建隔离；不将其冒充为通用 Planner
+- [x] 旧 Lattice/EM 与环道几何类型解耦，并从默认构建隔离；不将其冒充为通用 Planner
 - [x] controller 统一消费 `Trajectory`；支持注入 `Controller` 实现
 - [x] 几何路径与速度规划分层，增加曲率/加减速约束
 - [x] 建立 `VehicleInterface`，仿真车辆通过 `SimulatedVehicle` adapter 接入
-- [x] 接口冲突的旧 `car_controller_node` 已从构建与安装目标隔离，源码仅保留参考
+- [x] 删除接口冲突且未编译的旧 `car_controller_node` 与 `AutoDriver`，避免保留第二套运行链路
 
 验收：环形 Demo 不退化；相同 Runtime 使用非闭合折线路径也能工作；Node 只负责 callback/timer/converter。
 
@@ -97,6 +97,7 @@
 - [~] `ring_demo` / `mining_haul` 已可通过同一 launch 的 `scenario` 参数一键切换，矿区已有确定性路线/障碍；独立 YAML 资产及其他场景待实现
 - [~] `ring_demo` / `mining_haul` 已可通过同一 launch 的 `scenario` 参数一键切换，矿区已有高程路线、确定性障碍和三维 RViz/轨迹显示；独立 YAML 资产及其他场景待实现
 - [ ] 增加场景合同测试：路线有效、初始位姿可行、Behavior Profile 可加载、Mission 可达成、故障仍由 Safety 最终仲裁
+- [x] 建立 `RoadNetwork → lane ID route → materialized Mission` 单一路线来源；RViz 和默认 Mission 不再各自保存坐标副本
 
 验收：`scenario:=ring_demo|mining_haul|port_transport|agriculture_route` 会真正改变地图、路线、任务和环境；`behavior_profile` 只改变行为/安全策略。四个场景共用同一 `VehicleRuntime`、`Trajectory`、`VehicleInterface` 和 ROS 合同。
 
@@ -114,7 +115,7 @@
 - 不引入 Kafka、Service Mesh 或车端微服务化。
 - 不让云端直接设置 controller/planner 作为正式任务接口。
 - 不用软件 Safety 替代底盘硬件安全链路。
-- [ ] 将现有 Lattice/EM/Stanley/LQR/MPC 通过统一 adapter 接入 `VehicleRuntime`，提供 `planner.type` / `controller.type` 参数；当前它们仍属于旧 AutoDriver 链路
+- [ ] 将现有 Lattice/EM/Stanley/LQR/MPC 通过统一 adapter 接入 `VehicleRuntime`，提供 `planner.type` / `controller.type` 参数；其中环道假设仍需完成场景无关化
 
 ## 下一阶段总原则
 
@@ -131,7 +132,9 @@
 
 ## M0 — 目录与边界收敛
 
-- [ ] 将 `src/ros/` 明确为 `ros_adapter/`（保留兼容路径），避免与 `src/ros2/` 造成两套 ROS 层的误解
+- [x] 将农业场景与 CoveragePathPlanner 收敛进 `sdc_runtime_core`；核心目标不再依赖 ROS/可视化
+- [x] 定义目标目录布局、CMake target 边界和迁移顺序，见 `docs/repository-layout.md`
+- [x] 合并 `src/ros/` 与 `src/ros2/` 为 `src/adapters/ros/`，并迁移教学仿真/RViz 到 `adapters/`、旧 Demo 到 `legacy/`、入口点到 `apps/`
 - [ ] 将 `ring_road_sim_node` 拆为 Runtime Node、Visualization Adapter、Sensor Adapter
 - [ ] 将仍带环道假设的 legacy 代码标记并隔离，禁止新 Runtime 直接依赖
 - [ ] 统一只从 `autonomy.launch.py` 启动，清理文档中的 `ring_road` 领域命名
