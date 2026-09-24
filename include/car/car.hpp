@@ -17,11 +17,21 @@ class Car {
   /// 推进一个时间步（dt 秒）：感知 -> 决策 -> 控制 -> 更新状态。
   void step(double dt);
 
-  double speed() const { return speed_; }
-  double distance_traveled() const { return distance_traveled_; }
-  double front_distance() const { return front_distance_; }
-  void set_front_distance(double d) { front_distance_ = d; }
-  Action current_action() const { return current_action_; }
+  double speed() const {
+    return speed_;
+  }
+  double distance_traveled() const {
+    return distance_traveled_;
+  }
+  double front_distance() const {
+    return front_distance_;
+  }
+  void set_front_distance(double d) {
+    front_distance_ = d;
+  }
+  Action current_action() const {
+    return current_action_;
+  }
 
  private:
   DistanceSensor sensor_;

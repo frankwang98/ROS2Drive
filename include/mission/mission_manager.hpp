@@ -19,12 +19,16 @@ class MissionManager {
   bool succeed(const std::string& reason = "completed");
   bool fail(const std::string& reason);
   void updateProgress(double progress);
-  bool setStage(domain::MissionStage stage, domain::PayloadState payload,
-                double now_s = 0.0);
+  bool setStage(domain::MissionStage stage, domain::PayloadState payload, double now_s = 0.0);
   bool timedOut(double now_s) const;
   bool busy() const;
-  const std::string& lastError() const { return last_error_; }
-  const std::optional<domain::Mission>& current() const { return current_; }
+  const std::string& lastError() const {
+    return last_error_;
+  }
+  const std::optional<domain::Mission>& current() const {
+    return current_;
+  }
+
  private:
   static bool terminal(domain::MissionState state);
   static bool validate(const domain::Mission& mission, std::string& reason);

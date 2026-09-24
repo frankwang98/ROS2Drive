@@ -12,8 +12,7 @@ namespace sdc::control {
 class LegacyControllerAdapter final : public Controller {
  public:
   enum class Type { kStanley, kLqr, kMpc };
-  LegacyControllerAdapter(Type type, double wheelbase, double max_steering,
-                          double dt_s);
+  LegacyControllerAdapter(Type type, double wheelbase, double max_steering, double dt_s);
   domain::ControlCommand compute(const ControllerInput& input) override;
   void reset() override;
 

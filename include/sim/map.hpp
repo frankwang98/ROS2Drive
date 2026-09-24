@@ -21,7 +21,7 @@ using CarState = AckermannModel;
 
 /// 地图类型枚举（保留环形道路，去掉科目二）。
 enum class MapType {
-  kRing = 0,       // 环形道路（自动 / 手动驾驶）
+  kRing = 0,  // 环形道路（自动 / 手动驾驶）
 };
 
 const char* map_type_name(MapType t);
@@ -51,7 +51,9 @@ class ScenarioMap {
   /// 沿行驶方向的前视目标点（世界坐标）。
   /// 环形无终点，自动行驶应持续沿环前进，故基于小车当前位置返回一个
   /// 前方虚拟点（而非固定点），否则车会停在某个固定点不再前进。
-  virtual Vec2 goal_point_ahead(const CarState& car) const { return goal_point(); }
+  virtual Vec2 goal_point_ahead(const CarState& car) const {
+    return goal_point();
+  }
 
   /// 是否已完成当前任务（车抵达目标点附近）。
   virtual bool goal_reached(const CarState& car) const = 0;
@@ -73,9 +75,9 @@ class ScenarioMap {
  protected:
   // 由一组「线段障碍」（两端点 + 半径）构造 Obstacle 列表：
   // 把线段细分为若干圆，贴近连续墙体，避障更平滑。
-  static std::vector<Obstacle> wall_obstacles(
-      const std::vector<std::array<double, 4>>& segs,
-      double radius, double step);
+  static std::vector<Obstacle> wall_obstacles(const std::vector<std::array<double, 4>>& segs,
+                                              double radius,
+                                              double step);
 };
 
 /// 环形道路场景。
@@ -92,7 +94,9 @@ class RingMap : public ScenarioMap {
   // teaching road.
   RingMap(double radius = 26.0, double road_width = 6.0);
 
-  std::string name() const override { return "环形道路"; }
+  std::string name() const override {
+    return "环形道路";
+  }
   visualization_msgs::msg::MarkerArray build_road_markers() const override;
   visualization_msgs::msg::MarkerArray build_extra_markers() const override;
   void reset(CarState& car) const override;
@@ -102,8 +106,12 @@ class RingMap : public ScenarioMap {
   std::vector<Obstacle> to_obstacles() const override;
   std::vector<domain::Pose2D> reference_path() const override;
 
-  double radius() const { return radius_; }
-  double road_width() const { return road_width_; }
+  double radius() const {
+    return radius_;
+  }
+  double road_width() const {
+    return road_width_;
+  }
 
  private:
   /// 计算环道上某角度处的中心线点（世界坐标）。
@@ -121,7 +129,9 @@ class RingMap : public ScenarioMap {
 class DefinitionScenarioMap final : public ScenarioMap {
  public:
   explicit DefinitionScenarioMap(scenario::ScenarioDefinition definition);
-  std::string name() const override { return definition_.id; }
+  std::string name() const override {
+    return definition_.id;
+  }
   visualization_msgs::msg::MarkerArray build_road_markers() const override;
   visualization_msgs::msg::MarkerArray build_extra_markers() const override;
   void reset(CarState& car) const override;

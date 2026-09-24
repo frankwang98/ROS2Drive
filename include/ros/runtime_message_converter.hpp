@@ -21,17 +21,18 @@ struct MessageContext {
 };
 class RuntimeMessageConverter {
  public:
-  static self_driving_car_demo::msg::RuntimeStatus status(
-      const runtime::VehicleRuntime& runtime, const MessageContext& context,
-      bool localized);
-  static self_driving_car_demo::msg::Trajectory trajectory(
-      const runtime::VehicleRuntime& runtime, const MessageContext& context);
-  static self_driving_car_demo::msg::ControlCommand control(
-      const runtime::VehicleRuntime& runtime, const MessageContext& context);
-  static self_driving_car_demo::msg::FaultArray faults(
-      const runtime::VehicleRuntime& runtime, const MessageContext& context);
-  static self_driving_car_demo::msg::RuntimeMetrics metrics(
-      const runtime::VehicleRuntime& runtime, const MessageContext& context,
-      double loop_duration_ms, double configured_loop_hz);
+  static self_driving_car_demo::msg::RuntimeStatus status(const runtime::VehicleRuntime& runtime,
+                                                          const MessageContext& context,
+                                                          bool localized);
+  static self_driving_car_demo::msg::Trajectory trajectory(const runtime::VehicleRuntime& runtime,
+                                                           const MessageContext& context);
+  static self_driving_car_demo::msg::ControlCommand control(const runtime::VehicleRuntime& runtime,
+                                                            const MessageContext& context);
+  static self_driving_car_demo::msg::FaultArray faults(const runtime::VehicleRuntime& runtime,
+                                                       const MessageContext& context);
+  static self_driving_car_demo::msg::RuntimeMetrics metrics(const runtime::VehicleRuntime& runtime,
+                                                            const MessageContext& context,
+                                                            double loop_duration_ms,
+                                                            double configured_loop_hz);
 };
 }  // namespace sdc::ros

@@ -4,7 +4,6 @@
 
 namespace sdc::scenario {
 
-ScenarioDefinition makeRingScenarioDefinition(double radius = 26.0,
-                                               int segments = 200);
+ScenarioDefinition makeRingScenarioDefinition(double radius = 26.0, int segments = 200);
 
 }  // namespace sdc::scenario

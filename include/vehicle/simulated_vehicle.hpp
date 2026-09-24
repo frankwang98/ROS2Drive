@@ -12,7 +12,10 @@ class SimulatedVehicle final : public VehicleInterface {
   bool healthy() const override;
   void applyManual(double throttle, double steering, double dt_s);
   void reset(double x, double y, double yaw);
-  const AckermannModel& model() const { return model_; }
+  const AckermannModel& model() const {
+    return model_;
+  }
+
  private:
   AckermannModel model_;
   VelocityController velocity_controller_;

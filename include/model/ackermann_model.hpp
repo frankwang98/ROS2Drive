@@ -21,9 +21,9 @@ namespace sdc {
 class AckermannModel {
  public:
   struct Params {
-    double wheelbase = 2.0;   // 轴距（米）
-    double max_steer = 0.55;  // 前轮最大转角（弧度，约 ±31.5°）
-    double max_steer_rate = 0.9; // 前轮最大转角变化率（rad/s），抑制"画龙"
+    double wheelbase = 2.0;       // 轴距（米）
+    double max_steer = 0.55;      // 前轮最大转角（弧度，约 ±31.5°）
+    double max_steer_rate = 0.9;  // 前轮最大转角变化率（rad/s），抑制"画龙"
   };
 
   explicit AckermannModel();
@@ -39,15 +39,29 @@ class AckermannModel {
   void update(double speed_cmd, double steer_cmd, double dt);
 
   // 状态访问
-  double x() const     { return x_; }
-  double y() const     { return y_; }
-  double yaw() const   { return yaw_; }
-  double speed() const { return speed_; }
-  double steer() const { return steer_; }
-  double wheelbase() const { return p_.wheelbase; }
+  double x() const {
+    return x_;
+  }
+  double y() const {
+    return y_;
+  }
+  double yaw() const {
+    return yaw_;
+  }
+  double speed() const {
+    return speed_;
+  }
+  double steer() const {
+    return steer_;
+  }
+  double wheelbase() const {
+    return p_.wheelbase;
+  }
 
  private:
-  double clamp(double v, double lo, double hi) const { return std::fmin(hi, std::fmax(lo, v)); }
+  double clamp(double v, double lo, double hi) const {
+    return std::fmin(hi, std::fmax(lo, v));
+  }
 
   Params p_;
   double x_{0.0};

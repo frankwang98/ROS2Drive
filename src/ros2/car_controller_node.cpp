@@ -12,25 +12,23 @@
 #include "car/car.hpp"
 
 class CarControllerNode : public rclcpp::Node {
-public:
-  CarControllerNode()
-      : Node("car_controller")
-  {
+ public:
+  CarControllerNode() : Node("car_controller") {
     sub_distance_ = create_subscription<std_msgs::msg::Float64>(
-        "sensor/distance", 10,
+        "sensor/distance",
+        10,
         std::bind(&CarControllerNode::on_distance, this, std::placeholders::_1));
 
     pub_speed_ = create_publisher<std_msgs::msg::Float64>("actuator/speed", 10);
     pub_action_ = create_publisher<std_msgs::msg::Float64>("car/action_id", 10);
 
-    timer_ = create_wall_timer(
-        std::chrono::milliseconds(50),
-        std::bind(&CarControllerNode::control_step, this));
+    timer_ = create_wall_timer(std::chrono::milliseconds(50),
+                               std::bind(&CarControllerNode::control_step, this));
 
     RCLCPP_INFO(get_logger(), "Vehicle controller ready");
   }
 
-private:
+ private:
   void on_distance(const std_msgs::msg::Float64::SharedPtr msg) {
     front_distance_ = msg->data;
   }
@@ -52,7 +50,7 @@ private:
     pub_action_->publish(action_msg);
   }
 
-  sdc::DecisionMaker  decision_;
+  sdc::DecisionMaker decision_;
   sdc::MotorController motor_;
   double front_distance_{30.0};
   double car_speed_{0.0};

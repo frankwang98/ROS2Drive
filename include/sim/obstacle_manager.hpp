@@ -33,10 +33,14 @@ class ObstacleManager {
   void update(double dt);
 
   /// 当前活跃障碍物数量。
-  size_t size() const { return obstacles_.size(); }
+  size_t size() const {
+    return obstacles_.size();
+  }
 
   /// 活跃障碍物（world 坐标）。
-  const std::vector<RingObstacle>& obstacles() const { return obstacles_; }
+  const std::vector<RingObstacle>& obstacles() const {
+    return obstacles_;
+  }
 
   /// 转为世界坐标障碍物列表。
   std::vector<Obstacle> to_planner_obstacles() const;

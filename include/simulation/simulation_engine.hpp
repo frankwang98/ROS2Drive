@@ -28,20 +28,36 @@ class SimulationEngine {
   bool resume();
   bool cancelMission();
   void requestEmergencyStop(bool enabled);
-  bool acknowledgeSafetyRecovery() { return runtime_.acknowledgeSafetyRecovery(); }
-  void setFaultInjection(FaultInjection injection) { fault_injection_ = injection; }
-  void enableRecording(bool enabled) { recording_enabled_ = enabled; }
-  replay::RuntimeRecorder& recorder() { return recorder_; }
-  const replay::RuntimeRecorder& recorder() const { return recorder_; }
+  bool acknowledgeSafetyRecovery() {
+    return runtime_.acknowledgeSafetyRecovery();
+  }
+  void setFaultInjection(FaultInjection injection) {
+    fault_injection_ = injection;
+  }
+  void enableRecording(bool enabled) {
+    recording_enabled_ = enabled;
+  }
+  replay::RuntimeRecorder& recorder() {
+    return recorder_;
+  }
+  const replay::RuntimeRecorder& recorder() const {
+    return recorder_;
+  }
   bool setBehaviorManager(std::unique_ptr<behavior::BehaviorManager> manager);
   bool setPlanner(std::unique_ptr<planning::Planner> planner);
   bool setController(std::unique_ptr<control::Controller> controller);
   void setVelocityPlanner(planning::VelocityPlanner planner);
   void setSafetyManager(safety::SafetyManager manager);
 
-  const AckermannModel& vehicle() const { return vehicle_.model(); }
-  const runtime::VehicleRuntime& runtime() const { return runtime_; }
-  double simulationTime() const { return simulation_time_s_; }
+  const AckermannModel& vehicle() const {
+    return vehicle_.model();
+  }
+  const runtime::VehicleRuntime& runtime() const {
+    return runtime_;
+  }
+  double simulationTime() const {
+    return simulation_time_s_;
+  }
 
  private:
   vehicle::SimulatedVehicle vehicle_;

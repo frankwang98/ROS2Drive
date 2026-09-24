@@ -17,22 +17,25 @@ using visualization_msgs::msg::MarkerArray;
 // ============ 通用工具 ============
 geometry_msgs::msg::Point ScenarioMap::make_point(double x, double y, double z) {
   geometry_msgs::msg::Point p;
-  p.x = x; p.y = y; p.z = z;
+  p.x = x;
+  p.y = y;
+  p.z = z;
   return p;
 }
 
-std::vector<Obstacle> ScenarioMap::wall_obstacles(
-    const std::vector<std::array<double, 4>>& segs, double radius, double step) {
+std::vector<Obstacle> ScenarioMap::wall_obstacles(const std::vector<std::array<double, 4>>& segs,
+                                                  double radius,
+                                                  double step) {
   std::vector<Obstacle> out;
   for (const auto& s : segs) {
     double x0 = s[0], y0 = s[1], x1 = s[2], y1 = s[3];
     double len = std::hypot(x1 - x0, y1 - y0);
     int n = static_cast<int>(std::ceil(len / step));
-    if (n < 1) n = 1;
+    if (n < 1)
+      n = 1;
     for (int i = 0; i <= n; ++i) {
       double t = static_cast<double>(i) / n;
-      out.push_back(Obstacle{
-          Vec2{x0 + (x1 - x0) * t, y0 + (y1 - y0) * t}, radius});
+      out.push_back(Obstacle{Vec2{x0 + (x1 - x0) * t, y0 + (y1 - y0) * t}, radius});
     }
   }
   return out;
@@ -41,21 +44,24 @@ std::vector<Obstacle> ScenarioMap::wall_obstacles(
 // ============ 类型名 ============
 const char* map_type_name(MapType t) {
   switch (t) {
-    case MapType::kRing: return "Ring";
+    case MapType::kRing:
+      return "Ring";
   }
   return "Unknown";
 }
 
 const char* map_type_label(MapType t) {
   switch (t) {
-    case MapType::kRing: return "环形道路";
+    case MapType::kRing:
+      return "环形道路";
   }
   return "?";
 }
 
 std::unique_ptr<ScenarioMap> create_map(MapType t) {
   switch (t) {
-    case MapType::kRing: return std::make_unique<RingMap>();
+    case MapType::kRing:
+      return std::make_unique<RingMap>();
   }
   return std::make_unique<RingMap>();
 }
@@ -63,8 +69,7 @@ std::unique_ptr<ScenarioMap> create_map(MapType t) {
 // =====================================================================
 //  RingMap（环形道路，含复杂路型）
 // =====================================================================
-RingMap::RingMap(double radius, double road_width)
-    : radius_(radius), road_width_(road_width) {}
+RingMap::RingMap(double radius, double road_width) : radius_(radius), road_width_(road_width) {}
 
 Vec2 RingMap::point_on_ring(double angle) const {
   return Vec2{radius_ * std::cos(angle), radius_ * std::sin(angle)};
@@ -120,8 +125,7 @@ std::vector<Obstacle> RingMap::to_obstacles() const {
     for (int i = 0; i < N; ++i) {
       double a0 = 2.0 * M_PI * i / N;
       double a1 = 2.0 * M_PI * (i + 1) / N;
-      segs.push_back({r * std::cos(a0), r * std::sin(a0),
-                      r * std::cos(a1), r * std::sin(a1)});
+      segs.push_back({r * std::cos(a0), r * std::sin(a0), r * std::cos(a1), r * std::sin(a1)});
     }
   }
   auto walls = wall_obstacles(segs, 0.45, 1.2);
@@ -149,7 +153,7 @@ std::vector<Obstacle> RingMap::to_obstacles() const {
   {
     const double a_lo = 20.0 * M_PI / 180.0;
     const double a_hi = 50.0 * M_PI / 180.0;
-    const double lat_gap = 1.6;  // 门洞距中心线横向偏移（门洞宽约 2*lat_gap）
+    const double lat_gap = 1.6;    // 门洞距中心线横向偏移（门洞宽约 2*lat_gap）
     const double wall_len = 0.28;  // 墙的角度跨度（弧度）
     constexpr int kSeg = 8;
     // 内墙（向内收窄）
@@ -186,10 +190,15 @@ MarkerArray RingMap::build_road_markers() const {
   {
     Marker m;
     m.header.frame_id = "world";
-    m.ns = "road"; m.id = 0;
-    m.type = Marker::TRIANGLE_LIST; m.action = Marker::ADD;
+    m.ns = "road";
+    m.id = 0;
+    m.type = Marker::TRIANGLE_LIST;
+    m.action = Marker::ADD;
     m.pose.orientation.w = 1.0;
-    m.color.r = 0.2f; m.color.g = 0.2f; m.color.b = 0.25f; m.color.a = 0.85f;
+    m.color.r = 0.2f;
+    m.color.g = 0.2f;
+    m.color.b = 0.25f;
+    m.color.a = 0.85f;
     for (int i = 0; i < segments_; ++i) {
       double a0 = 2.0 * M_PI * i / segments_;
       double a1 = 2.0 * M_PI * (i + 1) / segments_;
@@ -207,11 +216,16 @@ MarkerArray RingMap::build_road_markers() const {
   for (int line = 0; line < 2; ++line) {
     Marker m;
     m.header.frame_id = "world";
-    m.ns = "road"; m.id = 1 + line;
-    m.type = Marker::LINE_LIST; m.action = Marker::ADD;
+    m.ns = "road";
+    m.id = 1 + line;
+    m.type = Marker::LINE_LIST;
+    m.action = Marker::ADD;
     m.pose.orientation.w = 1.0;
     m.scale.x = 0.12;
-    m.color.r = 1.0f; m.color.g = 0.85f; m.color.b = 0.2f; m.color.a = 0.9f;
+    m.color.r = 1.0f;
+    m.color.g = 0.85f;
+    m.color.b = 0.2f;
+    m.color.a = 0.9f;
     constexpr int DASH = 120;
     double dash_r = radius_ + (line == 0 ? -0.35 : 0.35);
     for (int i = 0; i < DASH; ++i) {
@@ -227,11 +241,16 @@ MarkerArray RingMap::build_road_markers() const {
   for (int k = 0; k < 2; ++k) {
     Marker m;
     m.header.frame_id = "world";
-    m.ns = "road"; m.id = 10 + k;
-    m.type = Marker::LINE_STRIP; m.action = Marker::ADD;
+    m.ns = "road";
+    m.id = 10 + k;
+    m.type = Marker::LINE_STRIP;
+    m.action = Marker::ADD;
     m.pose.orientation.w = 1.0;
     m.scale.x = 0.3;
-    m.color.r = 1.0f; m.color.g = 1.0f; m.color.b = 1.0f; m.color.a = 0.95f;
+    m.color.r = 1.0f;
+    m.color.g = 1.0f;
+    m.color.b = 1.0f;
+    m.color.a = 0.95f;
     double r = (k == 0) ? inner_r : outer_r;
     for (int i = 0; i <= segments_; ++i) {
       double a = 2.0 * M_PI * i / segments_;
@@ -244,12 +263,17 @@ MarkerArray RingMap::build_road_markers() const {
   {
     Marker m;
     m.header.frame_id = "world";
-    m.ns = "cross"; m.id = 0;
-    m.type = Marker::TRIANGLE_LIST; m.action = Marker::ADD;
+    m.ns = "cross";
+    m.id = 0;
+    m.type = Marker::TRIANGLE_LIST;
+    m.action = Marker::ADD;
     m.pose.orientation.w = 1.0;
-    m.color.r = 1.0f; m.color.g = 1.0f; m.color.b = 1.0f; m.color.a = 0.7f;
+    m.color.r = 1.0f;
+    m.color.g = 1.0f;
+    m.color.b = 1.0f;
+    m.color.a = 0.7f;
     const double a_center = 305.0 * M_PI / 180.0;
-    const double span = 0.12;      // 斑马线角度跨度
+    const double span = 0.12;  // 斑马线角度跨度
     constexpr int kStripes = 6;
     for (int i = 0; i < kStripes; ++i) {
       double a = a_center + (i - kStripes / 2.0) * span;
@@ -276,31 +300,39 @@ MarkerArray RingMap::build_road_markers() const {
 MarkerArray RingMap::build_extra_markers() const {
   MarkerArray ma;
   // 减速带 / 绕桩 / 窄门 等提示文字
-  const struct { double angle; double lat; const char* text; } tags[] = {
-      {130.0,  road_width_ / 2.0 + 1.2, "绕桩区"},
-      {20.0,   road_width_ / 2.0 + 1.2, "窄门"},
-      {300.0,  road_width_ / 2.0 + 1.2, "减速带"},
+  const struct {
+    double angle;
+    double lat;
+    const char* text;
+  } tags[] = {
+      {130.0, road_width_ / 2.0 + 1.2, "绕桩区"},
+      {20.0, road_width_ / 2.0 + 1.2, "窄门"},
+      {300.0, road_width_ / 2.0 + 1.2, "减速带"},
   };
   for (int i = 0; i < 3; ++i) {
     Marker m;
     m.header.frame_id = "world";
-    m.ns = "label"; m.id = i;
-    m.type = Marker::TEXT_VIEW_FACING; m.action = Marker::ADD;
+    m.ns = "label";
+    m.id = i;
+    m.type = Marker::TEXT_VIEW_FACING;
+    m.action = Marker::ADD;
     double a = tags[i].angle * M_PI / 180.0;
     double r = radius_ + tags[i].lat;
     m.pose.position.x = r * std::cos(a);
     m.pose.position.y = r * std::sin(a);
     m.pose.position.z = 1.6;
     m.scale.z = 1.2;
-    m.color.r = 1.0f; m.color.g = 0.85f; m.color.b = 0.2f; m.color.a = 1.0f;
+    m.color.r = 1.0f;
+    m.color.g = 0.85f;
+    m.color.b = 0.2f;
+    m.color.a = 1.0f;
     m.text = tags[i].text;
     ma.markers.push_back(m);
   }
   return ma;
 }
 
-DefinitionScenarioMap::DefinitionScenarioMap(
-    scenario::ScenarioDefinition definition)
+DefinitionScenarioMap::DefinitionScenarioMap(scenario::ScenarioDefinition definition)
     : definition_(std::move(definition)) {
   std::string reason;
   if (!scenario::validate(definition_, reason))
@@ -340,8 +372,7 @@ MarkerArray DefinitionScenarioMap::build_road_markers() const {
   road.action = Marker::ADD;
   road.pose.orientation.w = 1.0;
   const bool agriculture = definition_.id == "agriculture_route";
-  const bool defined_road = definition_.id == "mining_haul" ||
-                            definition_.id == "port_transport";
+  const bool defined_road = definition_.id == "mining_haul" || definition_.id == "port_transport";
   road.scale.x = agriculture ? 0.12 : defined_road ? 2.4 : 6.0;
   road.color.r = agriculture ? 0.75f : defined_road ? 0.12f : 0.22f;
   road.color.g = agriculture ? 0.65f : defined_road ? 0.14f : 0.22f;
@@ -377,8 +408,10 @@ MarkerArray DefinitionScenarioMap::build_road_markers() const {
     field_surface.scale.x = 42.0;
     field_surface.scale.y = 32.0;
     field_surface.scale.z = 0.1;
-    field_surface.color.r = 0.16f; field_surface.color.g = 0.23f;
-    field_surface.color.b = 0.12f; field_surface.color.a = 0.85f;
+    field_surface.color.r = 0.16f;
+    field_surface.color.g = 0.23f;
+    field_surface.color.b = 0.12f;
+    field_surface.color.a = 0.85f;
     markers.markers.push_back(std::move(field_surface));
     Marker field;
     field.header.frame_id = "world";
@@ -388,9 +421,14 @@ MarkerArray DefinitionScenarioMap::build_road_markers() const {
     field.action = Marker::ADD;
     field.pose.orientation.w = 1.0;
     field.scale.x = 0.18;
-    field.color.r = 0.35f; field.color.g = 0.75f; field.color.b = 0.25f; field.color.a = 0.9f;
-    field.points = {make_point(-21.0, -15.0, 0.06), make_point(21.0, -15.0, 0.06),
-                    make_point(21.0, 15.0, 0.06), make_point(-21.0, 15.0, 0.06),
+    field.color.r = 0.35f;
+    field.color.g = 0.75f;
+    field.color.b = 0.25f;
+    field.color.a = 0.9f;
+    field.points = {make_point(-21.0, -15.0, 0.06),
+                    make_point(21.0, -15.0, 0.06),
+                    make_point(21.0, 15.0, 0.06),
+                    make_point(-21.0, 15.0, 0.06),
                     make_point(-21.0, -15.0, 0.06)};
     markers.markers.push_back(std::move(field));
     Marker rows;
@@ -401,7 +439,10 @@ MarkerArray DefinitionScenarioMap::build_road_markers() const {
     rows.action = Marker::ADD;
     rows.pose.orientation.w = 1.0;
     rows.scale.x = 0.07;
-    rows.color.r = 0.55f; rows.color.g = 0.45f; rows.color.b = 0.18f; rows.color.a = 0.8f;
+    rows.color.r = 0.55f;
+    rows.color.g = 0.45f;
+    rows.color.b = 0.18f;
+    rows.color.a = 0.8f;
     for (int row = 0; row < 6; ++row) {
       const double y = -12.5 + row * 5.0;
       rows.points.push_back(make_point(-18.0, y, 0.07));
@@ -417,50 +458,108 @@ MarkerArray DefinitionScenarioMap::build_road_markers() const {
                                      std::initializer_list<std::pair<double, double>> points) {
       Marker road;
       road.header.frame_id = "world";
-      road.ns = "port_road_network"; road.id = id;
-      road.type = Marker::LINE_STRIP; road.action = Marker::ADD;
-      road.pose.orientation.w = 1.0; road.scale.x = 0.22;
-      road.color.r = 0.42f; road.color.g = 0.52f;
-      road.color.b = 0.58f; road.color.a = 0.95f;
+      road.ns = "port_road_network";
+      road.id = id;
+      road.type = Marker::LINE_STRIP;
+      road.action = Marker::ADD;
+      road.pose.orientation.w = 1.0;
+      road.scale.x = 0.22;
+      road.color.r = 0.42f;
+      road.color.g = 0.52f;
+      road.color.b = 0.58f;
+      road.color.a = 0.95f;
       for (const auto& point : points)
         road.points.push_back(ScenarioMap::make_point(point.first, point.second, 0.04));
       markers.markers.push_back(std::move(road));
     };
     // Smooth, drivable road graph: two east/west yard roads, three north/south
     // aisles and rounded links to the quay.  The task route follows one branch.
-    add_road(0, {{-30, -14}, {-10, -14}, {-8.5, -13.7}, {-7.3, -12.8},
-                 {-6.5, -11.5}, {-6, -9}, {-6, -5}, {-5.6, -3},
-                 {-4.5, -1.3}, {-3, 0}, {0, 1}, {4, 2}, {8, 3.5}, {11, 5.5}, {14, 7}});
-    add_road(1, {{-30, -18}, {-20, -18}, {-16, -17}, {-14, -14},
-                 {-11, -11}, {-8, -9}, {-4, -7}, {0, -6}, {4, -6}, {6, -5.5},
-                 {7.5, -4}, {8, -2}, {8, 2}, {8, 5}, {8, 8}, {8.5, 10},
-                 {9.5, 11.5}, {11, 12}, {13, 12}, {14.5, 11}, {15, 9.5},
-                 {14.8, 8}, {14, 7}});
-    add_road(2, {{-24, -20}, {-24, -14}, {-23.6, -12}, {-22.5, -10.5},
-                 {-21, -10}, {-18, -10}, {-16.5, -9.5}, {-16, -8}, {-16, 10}});
-    add_road(3, {{-12, -20}, {-12, -18}, {-11.5, -16.5}, {-10, -16},
-                 {-8, -16}, {-6.5, -15.5}, {-6, -14}, {-6, 10}});
-    add_road(4, {{2, -18}, {2, -14}, {2.4, -12}, {3.5, -10.5},
-                 {5, -10}, {8, -10}, {9.5, -9.5}, {10, -8}, {10, 10}});
+    add_road(0,
+             {{-30, -14},
+              {-10, -14},
+              {-8.5, -13.7},
+              {-7.3, -12.8},
+              {-6.5, -11.5},
+              {-6, -9},
+              {-6, -5},
+              {-5.6, -3},
+              {-4.5, -1.3},
+              {-3, 0},
+              {0, 1},
+              {4, 2},
+              {8, 3.5},
+              {11, 5.5},
+              {14, 7}});
+    add_road(1, {{-30, -18}, {-20, -18}, {-16, -17}, {-14, -14}, {-11, -11},  {-8, -9},
+                 {-4, -7},   {0, -6},    {4, -6},    {6, -5.5},  {7.5, -4},   {8, -2},
+                 {8, 2},     {8, 5},     {8, 8},     {8.5, 10},  {9.5, 11.5}, {11, 12},
+                 {13, 12},   {14.5, 11}, {15, 9.5},  {14.8, 8},  {14, 7}});
+    add_road(2,
+             {{-24, -20},
+              {-24, -14},
+              {-23.6, -12},
+              {-22.5, -10.5},
+              {-21, -10},
+              {-18, -10},
+              {-16.5, -9.5},
+              {-16, -8},
+              {-16, 10}});
+    add_road(3,
+             {{-12, -20},
+              {-12, -18},
+              {-11.5, -16.5},
+              {-10, -16},
+              {-8, -16},
+              {-6.5, -15.5},
+              {-6, -14},
+              {-6, 10}});
+    add_road(4,
+             {{2, -18},
+              {2, -14},
+              {2.4, -12},
+              {3.5, -10.5},
+              {5, -10},
+              {8, -10},
+              {9.5, -9.5},
+              {10, -8},
+              {10, 10}});
 
     Marker water;
     water.header.frame_id = "world";
-    water.ns = "port_water"; water.id = 1;
-    water.type = Marker::CUBE; water.action = Marker::ADD;
-    water.pose.position.x = 24.0; water.pose.position.y = 4.0;
-    water.pose.position.z = -0.10; water.pose.orientation.w = 1.0;
-    water.scale.x = 18.0; water.scale.y = 26.0; water.scale.z = 0.08;
-    water.color.r = 0.05f; water.color.g = 0.20f; water.color.b = 0.32f; water.color.a = 0.85f;
+    water.ns = "port_water";
+    water.id = 1;
+    water.type = Marker::CUBE;
+    water.action = Marker::ADD;
+    water.pose.position.x = 24.0;
+    water.pose.position.y = 4.0;
+    water.pose.position.z = -0.10;
+    water.pose.orientation.w = 1.0;
+    water.scale.x = 18.0;
+    water.scale.y = 26.0;
+    water.scale.z = 0.08;
+    water.color.r = 0.05f;
+    water.color.g = 0.20f;
+    water.color.b = 0.32f;
+    water.color.a = 0.85f;
     markers.markers.push_back(std::move(water));
 
     Marker quay;
     quay.header.frame_id = "world";
-    quay.ns = "port_quay"; quay.id = 2;
-    quay.type = Marker::CUBE; quay.action = Marker::ADD;
-    quay.pose.position.x = 15.5; quay.pose.position.y = 4.0;
-    quay.pose.position.z = 0.02; quay.pose.orientation.w = 1.0;
-    quay.scale.x = 1.0; quay.scale.y = 20.0; quay.scale.z = 0.12;
-    quay.color.r = 0.55f; quay.color.g = 0.58f; quay.color.b = 0.60f; quay.color.a = 1.0f;
+    quay.ns = "port_quay";
+    quay.id = 2;
+    quay.type = Marker::CUBE;
+    quay.action = Marker::ADD;
+    quay.pose.position.x = 15.5;
+    quay.pose.position.y = 4.0;
+    quay.pose.position.z = 0.02;
+    quay.pose.orientation.w = 1.0;
+    quay.scale.x = 1.0;
+    quay.scale.y = 20.0;
+    quay.scale.z = 0.12;
+    quay.color.r = 0.55f;
+    quay.color.g = 0.58f;
+    quay.color.b = 0.60f;
+    quay.color.a = 1.0f;
     markers.markers.push_back(std::move(quay));
 
     int container_id = 10;
@@ -468,12 +567,17 @@ MarkerArray DefinitionScenarioMap::build_road_markers() const {
       for (int col = 0; col < 4; ++col) {
         Marker container;
         container.header.frame_id = "world";
-        container.ns = "port_containers"; container.id = container_id++;
-        container.type = Marker::CUBE; container.action = Marker::ADD;
+        container.ns = "port_containers";
+        container.id = container_id++;
+        container.type = Marker::CUBE;
+        container.action = Marker::ADD;
         container.pose.position.x = -20.0 + col * 4.0;
         container.pose.position.y = 2.0 + row * 4.0;
-        container.pose.position.z = 0.6; container.pose.orientation.w = 1.0;
-        container.scale.x = 3.2; container.scale.y = 1.6; container.scale.z = 1.2;
+        container.pose.position.z = 0.6;
+        container.pose.orientation.w = 1.0;
+        container.scale.x = 3.2;
+        container.scale.y = 1.6;
+        container.scale.z = 1.2;
         container.color.r = row == 0 ? 0.80f : 0.18f;
         container.color.g = row == 0 ? 0.32f : 0.55f;
         container.color.b = row == 0 ? 0.12f : 0.75f;
@@ -489,22 +593,30 @@ MarkerArray DefinitionScenarioMap::build_extra_markers() const {
   MarkerArray markers;
   // Mining owns explicit LOAD/DUMP/PARK markers in the ROS visualization
   // adapter.  Do not add the legacy generic first/last-route labels here.
-  if (definition_.id == "mining_haul" || definition_.id == "agriculture_route") return markers;
+  if (definition_.id == "mining_haul" || definition_.id == "agriculture_route")
+    return markers;
   if (definition_.id == "port_transport") {
-    const auto add_label = [&markers, this](int id, std::size_t index,
-                                             const char* text, float r, float g, float b) {
-      if (index >= definition_.reference_route.size()) return;
-      const auto& pose = definition_.reference_route[index];
-      Marker marker;
-      marker.header.frame_id = "world";
-      marker.ns = "port_zones"; marker.id = id;
-      marker.type = Marker::TEXT_VIEW_FACING; marker.action = Marker::ADD;
-      marker.pose.position = make_point(pose.x, pose.y, 1.8);
-      marker.pose.orientation.w = 1.0; marker.scale.z = 1.2;
-      marker.color.r = r; marker.color.g = g; marker.color.b = b; marker.color.a = 1.0f;
-      marker.text = text;
-      markers.markers.push_back(std::move(marker));
-    };
+    const auto add_label =
+        [&markers, this](int id, std::size_t index, const char* text, float r, float g, float b) {
+          if (index >= definition_.reference_route.size())
+            return;
+          const auto& pose = definition_.reference_route[index];
+          Marker marker;
+          marker.header.frame_id = "world";
+          marker.ns = "port_zones";
+          marker.id = id;
+          marker.type = Marker::TEXT_VIEW_FACING;
+          marker.action = Marker::ADD;
+          marker.pose.position = make_point(pose.x, pose.y, 1.8);
+          marker.pose.orientation.w = 1.0;
+          marker.scale.z = 1.2;
+          marker.color.r = r;
+          marker.color.g = g;
+          marker.color.b = b;
+          marker.color.a = 1.0f;
+          marker.text = text;
+          markers.markers.push_back(std::move(marker));
+        };
     add_label(10, definition_.default_mission.load_index, "GATE", 0.2f, 0.8f, 1.0f);
     add_label(20, definition_.default_mission.dump_index, "QUAY", 1.0f, 0.6f, 0.1f);
     add_label(30, definition_.default_mission.parking_index, "PARK", 0.3f, 1.0f, 0.4f);

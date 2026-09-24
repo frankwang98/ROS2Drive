@@ -32,8 +32,8 @@ void AckermannModel::update(double speed_cmd, double steer_cmd, double dt) {
 
   // 3. 单车运动学积分（一阶前向欧拉）。
   if (dt > 0.0) {
-    x_   += speed_ * std::cos(yaw_) * dt;
-    y_   += speed_ * std::sin(yaw_) * dt;
+    x_ += speed_ * std::cos(yaw_) * dt;
+    y_ += speed_ * std::sin(yaw_) * dt;
     yaw_ += (speed_ / p_.wheelbase) * std::tan(steer_) * dt;
   }
 }

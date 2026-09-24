@@ -17,15 +17,33 @@ struct SafetyConfig {
 class SafetyManager {
  public:
   explicit SafetyManager(SafetyConfig config = {});
-  domain::ControlCommand enforce(const domain::VehicleState&, bool planning_ok, double now_s, bool estop_requested, domain::ControlCommand desired, bool perception_ok = true, bool vehicle_ok = true, bool control_ok = true);
+  domain::ControlCommand enforce(const domain::VehicleState&,
+                                 bool planning_ok,
+                                 double now_s,
+                                 bool estop_requested,
+                                 domain::ControlCommand desired,
+                                 bool perception_ok = true,
+                                 bool vehicle_ok = true,
+                                 bool control_ok = true);
   // Clear a latched stop only after inputs remain healthy and the vehicle is
   // stationary. Releasing a hardware emergency-stop remains outside Runtime.
   bool acknowledgeRecovery();
-  bool recoveryRequired() const { return latched_action_ >= domain::FaultAction::kStop; }
-  bool recoveryReady() const { return recovery_ready_; }
-  const FaultManager& faults() const { return faults_; }
-  domain::FaultAction lastAction() const { return last_action_; }
- private: SafetyConfig config_; FaultManager faults_;
+  bool recoveryRequired() const {
+    return latched_action_ >= domain::FaultAction::kStop;
+  }
+  bool recoveryReady() const {
+    return recovery_ready_;
+  }
+  const FaultManager& faults() const {
+    return faults_;
+  }
+  domain::FaultAction lastAction() const {
+    return last_action_;
+  }
+
+ private:
+  SafetyConfig config_;
+  FaultManager faults_;
   domain::FaultAction actionFor(domain::FaultCode code) const;
   domain::FaultAction last_action_{domain::FaultAction::kReportOnly};
   domain::FaultAction latched_action_{domain::FaultAction::kReportOnly};

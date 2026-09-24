@@ -7,28 +7,40 @@ namespace sdc {
 
 double AutoDriver::target_speed_for_action(Action a) {
   switch (a) {
-    case Action::kAccelerate: return 3.0;
-    case Action::kCruise:     return 2.0;
-    case Action::kBrake:      return 0.5;
-    case Action::kStop:       return 0.0;
-    default:                  return 0.0;
+    case Action::kAccelerate:
+      return 3.0;
+    case Action::kCruise:
+      return 2.0;
+    case Action::kBrake:
+      return 0.5;
+    case Action::kStop:
+      return 0.0;
+    default:
+      return 0.0;
   }
 }
 
 const char* AutoDriver::planning_algorithm_name(PlanningAlgorithm a) {
   switch (a) {
-    case PlanningAlgorithm::kLattice: return "Lattice";
-    case PlanningAlgorithm::kEm:      return "EM";
-    default:                          return "?";
+    case PlanningAlgorithm::kLattice:
+      return "Lattice";
+    case PlanningAlgorithm::kEm:
+      return "EM";
+    default:
+      return "?";
   }
 }
 
 const char* AutoDriver::lateral_algorithm_name(LateralAlgorithm a) {
   switch (a) {
-    case LateralAlgorithm::kStanley: return "Stanley";
-    case LateralAlgorithm::kLqr:     return "LQR";
-    case LateralAlgorithm::kMpc:     return "MPC";
-    default:                         return "?";
+    case LateralAlgorithm::kStanley:
+      return "Stanley";
+    case LateralAlgorithm::kLqr:
+      return "LQR";
+    case LateralAlgorithm::kMpc:
+      return "MPC";
+    default:
+      return "?";
   }
 }
 
@@ -50,10 +62,13 @@ void AutoDriver::reset(const ScenarioMap* map) {
   lqr_controller_.reset();
   mpc_controller_.reset();
   velocity_controller_.reset();
-  if (map) map->reset(car_);
+  if (map)
+    map->reset(car_);
 }
 
-void AutoDriver::run_planner(double car_x, double car_y, double car_yaw,
+void AutoDriver::run_planner(double car_x,
+                             double car_y,
+                             double car_yaw,
                              const std::vector<Obstacle>& obstacles) {
   if (planning_algo_ == PlanningAlgorithm::kEm) {
     em_planner_.plan(car_x, car_y, car_yaw, obstacles, candidates_);
@@ -62,25 +77,22 @@ void AutoDriver::run_planner(double car_x, double car_y, double car_yaw,
   }
 }
 
-double AutoDriver::compute_steer(double car_x, double car_y, double car_yaw,
-                                 const Vec2& target, double speed_cmd,
-                                 double dt) {
+double AutoDriver::compute_steer(
+    double car_x, double car_y, double car_yaw, const Vec2& target, double speed_cmd, double dt) {
   switch (lateral_algo_) {
     case LateralAlgorithm::kLqr:
-      return lqr_controller_.compute(car_x, car_y, car_yaw,
-                                     target.x, target.y, speed_cmd);
+      return lqr_controller_.compute(car_x, car_y, car_yaw, target.x, target.y, speed_cmd);
     case LateralAlgorithm::kMpc:
-      return mpc_controller_.compute(car_x, car_y, car_yaw,
-                                     target.x, target.y, speed_cmd, dt);
+      return mpc_controller_.compute(car_x, car_y, car_yaw, target.x, target.y, speed_cmd, dt);
     case LateralAlgorithm::kStanley:
     default:
-      return steering_controller_.compute(car_x, car_y, car_yaw,
-                                          target.x, target.y, speed_cmd);
+      return steering_controller_.compute(car_x, car_y, car_yaw, target.x, target.y, speed_cmd);
   }
 }
 
 double AutoDriver::front_obstacle_distance(const std::vector<Obstacle>& obs,
-                                           double car_x, double car_y,
+                                           double car_x,
+                                           double car_y,
                                            double car_yaw) const {
   constexpr double LIDAR_RANGE = 35.0;
   double fx = std::cos(car_yaw);
@@ -90,7 +102,8 @@ double AutoDriver::front_obstacle_distance(const std::vector<Obstacle>& obs,
     double dx = ob.position.x - car_x;
     double dy = ob.position.y - car_y;
     double dist = std::hypot(dx, dy) - ob.radius;
-    if (dist < 0) dist = 0.0;
+    if (dist < 0)
+      dist = 0.0;
     if (dist < min_d && (dx * fx + dy * fy) > 0.2) {
       min_d = dist;
     }
@@ -98,8 +111,7 @@ double AutoDriver::front_obstacle_distance(const std::vector<Obstacle>& obs,
   return min_d;
 }
 
-AutoDriver::StepResult AutoDriver::step(const Vec2& target, bool allow_reverse,
-                                        double dt) {
+AutoDriver::StepResult AutoDriver::step(const Vec2& target, bool allow_reverse, double dt) {
   StepResult res;
 
   double car_x = car_.x(), car_y = car_.y(), car_yaw = car_.yaw();
@@ -119,7 +131,7 @@ AutoDriver::StepResult AutoDriver::step(const Vec2& target, bool allow_reverse,
   //    在选中路径上并不会挡住去路，因此不会误判为必须停车；只有当
   //    选中路径也穿障（blocked）时才停车。
   double plan_speed = lattice_planner_.max_speed();
-  bool   path_blocked = false;
+  bool path_blocked = false;
   for (const auto& c : candidates_) {
     if (c.selected) {
       plan_speed = c.speed;
@@ -130,15 +142,18 @@ AutoDriver::StepResult AutoDriver::step(const Vec2& target, bool allow_reverse,
 
   Action action;
   if (path_blocked) {
-    action = Action::kStop;   // 无可通行路径，停车
+    action = Action::kStop;  // 无可通行路径，停车
   } else if (use_behavior_tree_) {
     // 行为树（BehaviorTree.CPP v3）基础行为切换：
     // 以选中路径的建议速度换算成前方等效距离，驱动行为树决策。
     // plan_speed 低说明靠近障碍，将其映射为距离供条件节点判定。
     double bt_dist = 10.0;
-    if (plan_speed < 1.0)      bt_dist = 1.0;   // 接近停车
-    else if (plan_speed < 2.0) bt_dist = 3.0;   // 减速区间
-    else if (plan_speed < 2.5) bt_dist = 6.0;   // 巡航区间
+    if (plan_speed < 1.0)
+      bt_dist = 1.0;  // 接近停车
+    else if (plan_speed < 2.0)
+      bt_dist = 3.0;  // 减速区间
+    else if (plan_speed < 2.5)
+      bt_dist = 6.0;  // 巡航区间
     action = behavior_tree_.tick(bt_dist);
   } else {
     action = decision_maker_.decide_by_speed(plan_speed);
@@ -148,10 +163,13 @@ AutoDriver::StepResult AutoDriver::step(const Vec2& target, bool allow_reverse,
   //    抵达目标附近则减速停车；否则按决策速度。
   double target_speed = target_speed_for_action(action);
   // 若 Lattice 因靠近障碍已建议减速，则沿用更保守的速度。
-  if (!path_blocked) target_speed = std::min(target_speed, plan_speed);
+  if (!path_blocked)
+    target_speed = std::min(target_speed, plan_speed);
   double d_to_goal = std::hypot(target.x - car_x, target.y - car_y);
-  if (d_to_goal < 2.5) target_speed = std::min(target_speed, 0.8);
-  if (d_to_goal < 0.8) target_speed = 0.0;
+  if (d_to_goal < 2.5)
+    target_speed = std::min(target_speed, 0.8);
+  if (d_to_goal < 0.8)
+    target_speed = 0.0;
 
   double speed_cmd = velocity_controller_.update(target_speed, speed_, dt);
 
@@ -188,8 +206,8 @@ double AutoDriver::manual_step(double throttle, double steer_cmd, double dt) {
   // 手动模式：直接由键盘指令控制车速与转向，绕过自动决策/避障规划。
   // throttle: 目标油门 (-1..1)。>0 前进，<0 倒车。
   //   前进：车速向 max_speed*throttle 逼近；倒车：向反方向逼近。
-  constexpr double kMaxSpeed = 4.0;    // 手动最高车速（m/s）
-  constexpr double kAccel = 2.5;       // 加速/制动响应（m/s²）
+  constexpr double kMaxSpeed = 4.0;  // 手动最高车速（m/s）
+  constexpr double kAccel = 2.5;     // 加速/制动响应（m/s²）
 
   // 1. 速度指令
   double target_speed = throttle * kMaxSpeed;
@@ -212,8 +230,8 @@ double AutoDriver::manual_step(double throttle, double steer_cmd, double dt) {
 }
 
 void AutoDriver::apply_control(const domain::ControlCommand& command, double dt) {
-  const double requested_speed = (command.emergency_stop || command.brake >= 0.99)
-                                     ? 0.0 : command.target_speed;
+  const double requested_speed =
+      (command.emergency_stop || command.brake >= 0.99) ? 0.0 : command.target_speed;
   speed_ = velocity_controller_.update(requested_speed, speed_, dt);
   car_.update(speed_, command.steering_angle, dt);
   speed_ = car_.speed();

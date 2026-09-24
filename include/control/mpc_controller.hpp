@@ -18,17 +18,17 @@ namespace sdc {
 class MpcController {
  public:
   struct Params {
-    int    horizon     = 15;    // 预测/控制时域长度 N
-    double dt          = 0.05;  // 预测步长（秒）
-    double wheelbase   = 2.0;   // 轴距（米）
-    double max_steer   = 0.55;  // 前轮最大转角（弧度）
-    double max_steer_rate = 0.9; // 相邻步最大转向变化率（rad/s·dt）
-    double q_heading   = 2.0;   // 航向误差权重
-    double q_lateral   = 3.0;   // 横向误差权重
-    double r_steer     = 0.5;   // 转向能量权重
-    double r_dsteer    = 2.0;   // 转向变化率权重（平滑）
-    int    iterations  = 40;    // 梯度下降迭代次数
-    double step_size   = 0.06;  // 梯度下降学习率
+    int horizon = 15;             // 预测/控制时域长度 N
+    double dt = 0.05;             // 预测步长（秒）
+    double wheelbase = 2.0;       // 轴距（米）
+    double max_steer = 0.55;      // 前轮最大转角（弧度）
+    double max_steer_rate = 0.9;  // 相邻步最大转向变化率（rad/s·dt）
+    double q_heading = 2.0;       // 航向误差权重
+    double q_lateral = 3.0;       // 横向误差权重
+    double r_steer = 0.5;         // 转向能量权重
+    double r_dsteer = 2.0;        // 转向变化率权重（平滑）
+    int iterations = 40;          // 梯度下降迭代次数
+    double step_size = 0.06;      // 梯度下降学习率
   };
 
   explicit MpcController();
@@ -40,21 +40,36 @@ class MpcController {
   /// @param speed                 当前车速（m/s）
   /// @param dt                    调用周期步长（秒）
   /// @return 前轮转角（弧度，正值左转）
-  double compute(double car_x, double car_y, double car_yaw,
-                 double goal_x, double goal_y, double speed, double dt);
+  double compute(double car_x,
+                 double car_y,
+                 double car_yaw,
+                 double goal_x,
+                 double goal_y,
+                 double speed,
+                 double dt);
 
-  void reset() { last_steer_ = 0.0; }
+  void reset() {
+    last_steer_ = 0.0;
+  }
 
  private:
-  struct State { double x = 0.0, y = 0.0, yaw = 0.0; };
+  struct State {
+    double x = 0.0, y = 0.0, yaw = 0.0;
+  };
 
   /// 用单车模型从 state 出发，给定转向序列 u，滚动预测 N 步，输出轨迹。
-  void rollout(const State& s0, double speed, const std::vector<double>& u,
-               double dt, std::vector<State>& traj) const;
+  void rollout(const State& s0,
+               double speed,
+               const std::vector<double>& u,
+               double dt,
+               std::vector<State>& traj) const;
 
   /// 计算目标函数值（航向/横向误差 + 控制能量 + 控制变化率）。
-  double cost(const State& s0, double speed, const std::vector<double>& u,
-              double dt, double goal_yaw) const;
+  double cost(const State& s0,
+              double speed,
+              const std::vector<double>& u,
+              double dt,
+              double goal_yaw) const;
 
   double clamp(double v, double lo, double hi) const {
     return v < lo ? lo : (v > hi ? hi : v);

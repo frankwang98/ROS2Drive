@@ -8,8 +8,16 @@ namespace sdc::domain {
 
 // Planar pose with optional elevation. Runtime control remains planar for now;
 // z is carried by routes/trajectories for 3D visualization and future grade control.
-struct Pose2D { double x{0.0}; double y{0.0}; double yaw{0.0}; double z{0.0}; };
-struct Twist2D { double linear{0.0}; double angular{0.0}; };
+struct Pose2D {
+  double x{0.0};
+  double y{0.0};
+  double yaw{0.0};
+  double z{0.0};
+};
+struct Twist2D {
+  double linear{0.0};
+  double angular{0.0};
+};
 
 struct VehicleState {
   Pose2D pose;
@@ -78,7 +86,21 @@ struct Mission {
 
 enum class FaultSeverity { kInfo, kWarning, kError, kFatal };
 enum class FaultAction { kReportOnly, kDegrade, kStop, kEmergencyStop };
-enum class FaultCode { kLocalizationLost, kPlanningFailed, kControlError, kVehicleError, kInputTimeout, kPerceptionTimeout, kEmergencyStop };
-struct Fault { FaultCode code; FaultSeverity severity; std::string message; double stamp_s{0.0}; bool active{true}; };
+enum class FaultCode {
+  kLocalizationLost,
+  kPlanningFailed,
+  kControlError,
+  kVehicleError,
+  kInputTimeout,
+  kPerceptionTimeout,
+  kEmergencyStop
+};
+struct Fault {
+  FaultCode code;
+  FaultSeverity severity;
+  std::string message;
+  double stamp_s{0.0};
+  bool active{true};
+};
 
 }  // namespace sdc::domain

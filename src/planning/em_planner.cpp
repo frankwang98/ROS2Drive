@@ -10,8 +10,7 @@ EmPlanner::EmPlanner(const EmPlannerParams& p) : p_(p) {}
 
 Vec2 EmPlanner::center_at(double s0_angle, double s) const {
   double theta = s0_angle + s / p_.ring_radius;
-  return Vec2{p_.ring_radius * std::cos(theta),
-              p_.ring_radius * std::sin(theta)};
+  return Vec2{p_.ring_radius * std::cos(theta), p_.ring_radius * std::sin(theta)};
 }
 
 // 五阶多项式 d(s) = a0 + a1 s + a2 s² + a3 s³ + a4 s⁴ + a5 s⁵
@@ -19,8 +18,11 @@ Vec2 EmPlanner::center_at(double s0_angle, double s) const {
 //   d(0)=d0, d'(0)=d0_prime, d''(0)=0
 //   d(L)=d_target, d'(L)=0, d''(L)=0
 // 经典闭合解（Frenet 采样常用）。
-void EmPlanner::build_profile(double d0, double d0_prime, double d_target,
-                              double lookahead, int samples,
+void EmPlanner::build_profile(double d0,
+                              double d0_prime,
+                              double d_target,
+                              double lookahead,
+                              int samples,
                               std::vector<double>& d_profile) const {
   double L = std::fmax(lookahead, 1e-6);
   double L2 = L * L, L3 = L2 * L, L4 = L3 * L, L5 = L4 * L;
@@ -52,13 +54,13 @@ double EmPlanner::evaluate(const LatticeTrajectory& traj,
       double dx = pt.x - ob.position.x;
       double dy = pt.y - ob.position.y;
       double d = std::sqrt(dx * dx + dy * dy) - ob.radius;
-      if (d < ob_min) ob_min = d;
+      if (d < ob_min)
+        ob_min = d;
     }
     if (ob_min <= 0.0) {
       cost += 1e5;  // 穿障：极大代价
     } else if (ob_min < p_.obstacle_safe_dist) {
-      cost += p_.obstacle_cost_gain *
-              std::pow(1.0 - ob_min / p_.obstacle_safe_dist, 2);
+      cost += p_.obstacle_cost_gain * std::pow(1.0 - ob_min / p_.obstacle_safe_dist, 2);
     }
   }
 
@@ -88,7 +90,9 @@ double EmPlanner::evaluate(const LatticeTrajectory& traj,
   return cost;
 }
 
-void EmPlanner::plan(double pose_x, double pose_y, double yaw,
+void EmPlanner::plan(double pose_x,
+                     double pose_y,
+                     double yaw,
                      const std::vector<Obstacle>& obstacles,
                      std::vector<LatticeTrajectory>& out) const {
   out.clear();
@@ -98,8 +102,7 @@ void EmPlanner::plan(double pose_x, double pose_y, double yaw,
   // 当前横向偏移（车在环道中心线上的偏移，用径向投影计算）
   double theta0 = s0_angle;
   double nx = std::cos(theta0), ny = std::sin(theta0);
-  double d0 = (pose_x - p_.ring_radius * nx) * nx +
-              (pose_y - p_.ring_radius * ny) * ny;
+  double d0 = (pose_x - p_.ring_radius * nx) * nx + (pose_y - p_.ring_radius * ny) * ny;
   // 环道切线方向角（CCW 环上某点的前进方向 = 径向角 + π/2）
   double tangent_yaw = theta0 + M_PI / 2.0;
   // 初始横向偏移随弧长的导数：dd/ds ≈ tan(车头相对切线方向的夹角)
@@ -107,14 +110,14 @@ void EmPlanner::plan(double pose_x, double pose_y, double yaw,
 
   // 横向候选偏移列表（从负到正）
   std::vector<double> lat_offsets;
-  for (double r = -p_.max_lateral; r <= p_.max_lateral + 1e-9;
-       r += p_.lateral_step) {
+  for (double r = -p_.max_lateral; r <= p_.max_lateral + 1e-9; r += p_.lateral_step) {
     lat_offsets.push_back(r);
   }
-  if (lat_offsets.empty()) lat_offsets.push_back(d0);
+  if (lat_offsets.empty())
+    lat_offsets.push_back(d0);
 
   double best_cost = std::numeric_limits<double>::infinity();
-  int    best_idx = -1;
+  int best_idx = -1;
 
   for (size_t i = 0; i < lat_offsets.size(); ++i) {
     double r_target = lat_offsets[i];
@@ -131,11 +134,9 @@ void EmPlanner::plan(double pose_x, double pose_y, double yaw,
       double s = p_.lookahead * static_cast<double>(k) / p_.s_samples;
       double d = d_profile[static_cast<size_t>(k)];
       double theta = s0_angle + s / p_.ring_radius;
-      Vec2 center{p_.ring_radius * std::cos(theta),
-                  p_.ring_radius * std::sin(theta)};
+      Vec2 center{p_.ring_radius * std::cos(theta), p_.ring_radius * std::sin(theta)};
       Vec2 radial{std::cos(theta), std::sin(theta)};
-      traj.path.push_back(Vec2{center.x + d * radial.x,
-                               center.y + d * radial.y});
+      traj.path.push_back(Vec2{center.x + d * radial.x, center.y + d * radial.y});
     }
 
     // M 步：评估代价并计算速度 / 可通行性
@@ -147,11 +148,12 @@ void EmPlanner::plan(double pose_x, double pose_y, double yaw,
         double dx = pt.x - ob.position.x;
         double dy = pt.y - ob.position.y;
         double d = std::sqrt(dx * dx + dy * dy) - ob.radius;
-        if (d < min_d) min_d = d;
+        if (d < min_d)
+          min_d = d;
       }
     }
-    traj.clearance = (min_d == std::numeric_limits<double>::infinity())
-                         ? p_.obstacle_safe_dist : min_d;
+    traj.clearance =
+        (min_d == std::numeric_limits<double>::infinity()) ? p_.obstacle_safe_dist : min_d;
     traj.blocked = (min_d < 0.35);
     traj.speed = p_.max_speed;
     if (min_d < p_.obstacle_safe_dist && min_d > 0.0) {

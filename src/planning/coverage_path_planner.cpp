@@ -5,17 +5,17 @@
 
 namespace sdc::planning {
 
-CoveragePathPlanner::CoveragePathPlanner()
-    : CoveragePathPlanner(Config{}) {}
+CoveragePathPlanner::CoveragePathPlanner() : CoveragePathPlanner(Config{}) {}
 
 CoveragePathPlanner::CoveragePathPlanner(Config config)
-    : config_(config), dense_planner_(ReferencePathPlanner::Config{
+    : config_(config),
+      dense_planner_(ReferencePathPlanner::Config{
           config.spacing, config.horizon, config.obstacle_margin, false}) {}
 
 std::vector<domain::Pose2D> CoveragePathPlanner::build_rows() const {
   std::vector<domain::Pose2D> route;
-  const int rows = std::max(1, static_cast<int>(std::floor(
-      (config_.max_y - config_.min_y) / config_.row_spacing)) + 1);
+  const int rows = std::max(
+      1, static_cast<int>(std::floor((config_.max_y - config_.min_y) / config_.row_spacing)) + 1);
   const double radius = std::max(1.0, config_.headland_radius);
   for (int row = 0; row < rows; ++row) {
     const double y = config_.min_y + row * config_.row_spacing;

@@ -9,14 +9,18 @@ namespace sdc {
 namespace {
 constexpr double kRampAccel = 1.0;  // m/s^2
 constexpr double kRampDecel = 3.0;  // m/s^2
-}
+}  // namespace
 
 const char* velocity_algorithm_name(VelocityAlgorithm a) {
   switch (a) {
-    case VelocityAlgorithm::kPid:      return "PID";
-    case VelocityAlgorithm::kBangBang: return "Bang-Bang";
-    case VelocityAlgorithm::kRamp:     return "Ramp";
-    default:                           return "Unknown";
+    case VelocityAlgorithm::kPid:
+      return "PID";
+    case VelocityAlgorithm::kBangBang:
+      return "Bang-Bang";
+    case VelocityAlgorithm::kRamp:
+      return "Ramp";
+    default:
+      return "Unknown";
   }
 }
 

@@ -24,14 +24,22 @@ ScenarioDefinition makeRingScenarioDefinition(double radius, int segments) {
   definition.default_mission.id = "ring-demo";
   definition.default_mission.type = domain::MissionType::kFollowRoute;
   definition.default_mission.route = definition.reference_route;
-  definition.default_mission.speed_limit =
-      definition.vehicle_constraints.maximum_speed;
+  definition.default_mission.speed_limit = definition.vehicle_constraints.maximum_speed;
   // Deterministic benchmark obstacles.  Their positions are fixed so planner
   // and controller comparisons are repeatable across runs.
   definition.static_obstacles = {
-      {"ring-benchmark-lane-1", {route_radius * std::cos(0.85), route_radius * std::sin(0.85), 0.0}, 0.8, false},
-      {"ring-benchmark-lane-2", {route_radius * std::cos(3.00), route_radius * std::sin(3.00), 0.0}, 0.8, false},
-      {"ring-benchmark-lane-3", {route_radius * std::cos(5.15), route_radius * std::sin(5.15), 0.0}, 0.8, false}};
+      {"ring-benchmark-lane-1",
+       {route_radius * std::cos(0.85), route_radius * std::sin(0.85), 0.0},
+       0.8,
+       false},
+      {"ring-benchmark-lane-2",
+       {route_radius * std::cos(3.00), route_radius * std::sin(3.00), 0.0},
+       0.8,
+       false},
+      {"ring-benchmark-lane-3",
+       {route_radius * std::cos(5.15), route_radius * std::sin(5.15), 0.0},
+       0.8,
+       false}};
   definition.default_behavior_profile = "RingDemo";
   return definition;
 }

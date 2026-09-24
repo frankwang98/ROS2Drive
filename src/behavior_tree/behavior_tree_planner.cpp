@@ -84,8 +84,7 @@ namespace {
 // "看起来在跑但其实是错的"状态。
 class DistanceCondition : public BT::ConditionNode {
  public:
-  DistanceCondition(const std::string& name,
-                    const BT::NodeConfiguration& config)
+  DistanceCondition(const std::string& name, const BT::NodeConfiguration& config)
       : BT::ConditionNode(name, config) {}
 
   static BT::PortsList providedPorts() {
@@ -105,9 +104,9 @@ class DistanceCondition : public BT::ConditionNode {
     }
     double configured_threshold = 0.0;
     if (!getInput("threshold", configured_threshold)) {
-      throw BT::RuntimeError(
-          name() + ": missing 'threshold' input port; "
-          "threshold must be provided by the BehaviorTree XML / SubTree args.");
+      throw BT::RuntimeError(name() +
+                             ": missing 'threshold' input port; "
+                             "threshold must be provided by the BehaviorTree XML / SubTree args.");
     }
     if (front_dist < configured_threshold) {
       setOutput("action", action_value());
@@ -120,26 +119,31 @@ class DistanceCondition : public BT::ConditionNode {
 class EmergencyStop : public DistanceCondition {
  public:
   using DistanceCondition::DistanceCondition;
-  int action_value() const override { return static_cast<int>(Action::kStop); }
+  int action_value() const override {
+    return static_cast<int>(Action::kStop);
+  }
 };
 
 class SlowDown : public DistanceCondition {
  public:
   using DistanceCondition::DistanceCondition;
-  int action_value() const override { return static_cast<int>(Action::kBrake); }
+  int action_value() const override {
+    return static_cast<int>(Action::kBrake);
+  }
 };
 
 class Cruise : public DistanceCondition {
  public:
   using DistanceCondition::DistanceCondition;
-  int action_value() const override { return static_cast<int>(Action::kCruise); }
+  int action_value() const override {
+    return static_cast<int>(Action::kCruise);
+  }
 };
 
 // ---------- 动作节点：无条件加速（兜底） ----------
 class AccelerateAction : public BT::SyncActionNode {
  public:
-  AccelerateAction(const std::string& name,
-                   const BT::NodeConfiguration& config)
+  AccelerateAction(const std::string& name, const BT::NodeConfiguration& config)
       : BT::SyncActionNode(name, config) {}
 
   static BT::PortsList providedPorts() {
@@ -160,8 +164,7 @@ class AccelerateAction : public BT::SyncActionNode {
 // 实现
 // ============================================================
 BehaviorTreePlanner::BehaviorTreePlanner()
-    : factory_(nullptr), tree_(nullptr), initialized_(false),
-      last_action_(Action::kCruise) {}
+    : factory_(nullptr), tree_(nullptr), initialized_(false), last_action_(Action::kCruise) {}
 
 BehaviorTreePlanner::~BehaviorTreePlanner() {
 #ifdef BEHAVIORTREE_CPP_V3_FOUND
@@ -173,10 +176,10 @@ BehaviorTreePlanner::~BehaviorTreePlanner() {
 #endif
 }
 
-bool BehaviorTreePlanner::init(const std::string& xml_path,
-                               const std::string& tree_id) {
+bool BehaviorTreePlanner::init(const std::string& xml_path, const std::string& tree_id) {
 #ifdef BEHAVIORTREE_CPP_V3_FOUND
-  if (initialized_) return true;
+  if (initialized_)
+    return true;
 
   auto factory = std::make_unique<BT::BehaviorTreeFactory>();
 
@@ -191,7 +194,8 @@ bool BehaviorTreePlanner::init(const std::string& xml_path,
   blackboard->set<int>("action", static_cast<int>(Action::kAccelerate));
 
   try {
-    if (tree_id.empty()) throw std::invalid_argument("BehaviorTree ID must not be empty");
+    if (tree_id.empty())
+      throw std::invalid_argument("BehaviorTree ID must not be empty");
     if (xml_path.empty())
       factory->registerBehaviorTreeFromText(xml());
     else

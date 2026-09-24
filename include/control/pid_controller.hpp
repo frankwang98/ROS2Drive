@@ -14,17 +14,17 @@ namespace sdc {
 class PidController {
  public:
   struct Params {
-    double kp = 2.0;     // 比例系数
-    double ki = 0.5;     // 积分系数
-    double kd = 0.1;     // 微分系数
-    double out_min = -4.0;  // 输出下限（如最大减速度）
-    double out_max =  4.0;  // 输出上限（如最大加速度）
-    double dt = 0.05;       // 默认采样周期（秒）
+    double kp = 2.0;               // 比例系数
+    double ki = 0.5;               // 积分系数
+    double kd = 0.1;               // 微分系数
+    double out_min = -4.0;         // 输出下限（如最大减速度）
+    double out_max = 4.0;          // 输出上限（如最大加速度）
+    double dt = 0.05;              // 默认采样周期（秒）
     double integral_limit = 20.0;  // 积分项限幅（抗饱和）
   };
 
-  explicit PidController();                // 使用默认参数
-  explicit PidController(const Params& p); // 自定义参数
+  explicit PidController();                 // 使用默认参数
+  explicit PidController(const Params& p);  // 自定义参数
 
   /// 重置内部状态（误差积分 / 上次误差 / 上次微分）。
   void reset();
@@ -33,14 +33,16 @@ class PidController {
   double compute(double setpoint, double feedback);
 
   /// 更新/替换参数。
-  void set_params(const Params& p) { p_ = p; }
+  void set_params(const Params& p) {
+    p_ = p;
+  }
 
  private:
   Params p_;
   double integral_{0.0};
   double prev_error_{0.0};
   double prev_derivative_{0.0};
-  bool   first_run_{true};
+  bool first_run_{true};
 };
 
 }  // namespace sdc

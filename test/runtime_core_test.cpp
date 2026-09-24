@@ -21,8 +21,7 @@ using sdc::domain::Pose2D;
 
 class FailingPlanner final : public sdc::planning::Planner {
  public:
-  sdc::planning::PlanningResult plan(
-      const sdc::planning::PlanningInput&) override {
+  sdc::planning::PlanningResult plan(const sdc::planning::PlanningInput&) override {
     return {{}, false, "injected_planning_failure"};
   }
 };
@@ -93,8 +92,7 @@ TEST(ReferencePathPlanner, ProducesDenseTrajectoryForNonRingRoute) {
   sdc::planning::PlanningInput input;
   input.vehicle.localized = true;
   input.vehicle.pose = {0.0, 0.0, 0.0};
-  input.reference_path = {{0.0, 0.0, 0.0}, {4.0, 0.0, 0.0},
-                          {4.0, 4.0, 1.57}};
+  input.reference_path = {{0.0, 0.0, 0.0}, {4.0, 0.0, 0.0}, {4.0, 4.0, 1.57}};
   input.speed_limit = 2.0;
   input.now_s = 1.0;
   const auto result = planner.plan(input);
@@ -135,8 +133,8 @@ TEST(RingLanePlanner, CommitsToRightLaneForLeftLaneObstacle) {
     input.reference_path.push_back(
         {24.5 * std::cos(angle), 24.5 * std::sin(angle), angle + M_PI_2});
   }
-  input.obstacles.push_back({"left-lane-blocker", {24.5 * std::cos(0.85),
-                            24.5 * std::sin(0.85), 0.0}, 0.8, false});
+  input.obstacles.push_back(
+      {"left-lane-blocker", {24.5 * std::cos(0.85), 24.5 * std::sin(0.85), 0.0}, 0.8, false});
   input.speed_limit = 1.5;
   const auto result = planner.plan(input);
   ASSERT_TRUE(result.success);
@@ -158,8 +156,8 @@ TEST(RingLanePlanner, RejectsTrajectoryThatWouldCollide) {
         {24.5 * std::cos(angle), 24.5 * std::sin(angle), angle + M_PI_2});
   }
   // The obstacle spans both 3 m lanes. A lane change is not feasible.
-  input.obstacles.push_back({"blocked-road", {26.0 * std::cos(0.4),
-                            26.0 * std::sin(0.4), 0.0}, 3.0, false});
+  input.obstacles.push_back(
+      {"blocked-road", {26.0 * std::cos(0.4), 26.0 * std::sin(0.4), 0.0}, 3.0, false});
   input.speed_limit = 1.5;
   const auto result = planner.plan(input);
   EXPECT_FALSE(result.success);
@@ -171,15 +169,15 @@ TEST(RingLanePlanner, DoesNotStopForPassedLeftLaneObstacle) {
   sdc::planning::PlanningInput input;
   input.vehicle.localized = true;
   const double vehicle_angle = 1.0;
-  input.vehicle.pose = {27.5 * std::cos(vehicle_angle),
-                        27.5 * std::sin(vehicle_angle), vehicle_angle + M_PI_2};
+  input.vehicle.pose = {
+      27.5 * std::cos(vehicle_angle), 27.5 * std::sin(vehicle_angle), vehicle_angle + M_PI_2};
   for (int i = 0; i <= 120; ++i) {
     const double angle = 2.0 * M_PI * i / 120.0;
     input.reference_path.push_back(
         {24.5 * std::cos(angle), 24.5 * std::sin(angle), angle + M_PI_2});
   }
-  input.obstacles.push_back({"passed-left-blocker", {24.5 * std::cos(0.85),
-                            24.5 * std::sin(0.85), 0.0}, 0.8, false});
+  input.obstacles.push_back(
+      {"passed-left-blocker", {24.5 * std::cos(0.85), 24.5 * std::sin(0.85), 0.0}, 0.8, false});
   input.speed_limit = 1.5;
   const auto result = planner.plan(input);
   EXPECT_TRUE(result.success) << result.reason;
@@ -207,8 +205,7 @@ TEST(SafetyManager, StopsForTimeoutPlanningFailureAndEstop) {
 
 TEST(SafetyManager, AppliesConfiguredDegradePolicy) {
   sdc::safety::SafetyConfig config;
-  config.policies[sdc::domain::FaultCode::kLocalizationLost] =
-      sdc::domain::FaultAction::kDegrade;
+  config.policies[sdc::domain::FaultCode::kLocalizationLost] = sdc::domain::FaultAction::kDegrade;
   sdc::safety::SafetyManager safety(config);
   sdc::domain::VehicleState state;
   state.localized = false;
@@ -234,12 +231,10 @@ TEST(SafetyManager, StopsForStalePerceptionAndInvalidControl) {
   state.stamp_s = 2.0;
   sdc::domain::ControlCommand desired;
   desired.target_speed = 1.0;
-  auto command = safety.enforce(state, true, 2.1, false, desired,
-                                false, true, true);
+  auto command = safety.enforce(state, true, 2.1, false, desired, false, true, true);
   EXPECT_DOUBLE_EQ(command.target_speed, 0.0);
   EXPECT_DOUBLE_EQ(command.brake, 1.0);
-  command = safety.enforce(state, true, 2.1, false, desired,
-                           true, true, false);
+  command = safety.enforce(state, true, 2.1, false, desired, true, true, false);
   EXPECT_DOUBLE_EQ(command.target_speed, 0.0);
 }
 
@@ -252,8 +247,7 @@ TEST(SafetyManager, StopFaultRequiresHealthyAcknowledgedRecovery) {
   state.stamp_s = 1.0;
   sdc::domain::ControlCommand desired;
   desired.target_speed = 1.0;
-  EXPECT_DOUBLE_EQ(safety.enforce(state, true, 1.1, false, desired).target_speed,
-                   0.0);
+  EXPECT_DOUBLE_EQ(safety.enforce(state, true, 1.1, false, desired).target_speed, 0.0);
   EXPECT_TRUE(safety.recoveryRequired());
   EXPECT_FALSE(safety.acknowledgeRecovery());
 
@@ -265,13 +259,11 @@ TEST(SafetyManager, StopFaultRequiresHealthyAcknowledgedRecovery) {
   EXPECT_TRUE(safety.recoveryReady());
   EXPECT_TRUE(safety.acknowledgeRecovery());
   EXPECT_FALSE(safety.recoveryRequired());
-  EXPECT_DOUBLE_EQ(safety.enforce(state, true, 1.3, false, desired).target_speed,
-                   1.0);
+  EXPECT_DOUBLE_EQ(safety.enforce(state, true, 1.3, false, desired).target_speed, 1.0);
 }
 
 TEST(VehicleRuntime, CompletesStopMission) {
-  sdc::runtime::VehicleRuntime runtime(
-      std::make_unique<sdc::planning::ReferencePathPlanner>());
+  sdc::runtime::VehicleRuntime runtime(std::make_unique<sdc::planning::ReferencePathPlanner>());
   sdc::domain::VehicleState state;
   state.localized = true;
   state.stamp_s = 1.0;
@@ -287,8 +279,7 @@ TEST(VehicleRuntime, CompletesStopMission) {
 }
 
 TEST(VehicleRuntime, CompletesNavigateToInsideGoalTolerance) {
-  sdc::runtime::VehicleRuntime runtime(
-      std::make_unique<sdc::planning::ReferencePathPlanner>());
+  sdc::runtime::VehicleRuntime runtime(std::make_unique<sdc::planning::ReferencePathPlanner>());
   sdc::domain::VehicleState state;
   state.localized = true;
   state.pose = {0.0, 0.0, 0.0};
@@ -350,7 +341,8 @@ TEST(SimulationEngine, PerceptionDropoutTriggersWatchdog) {
   simulation.step(0.05);
   simulation.setFaultInjection({true, false});
   sdc::runtime::RuntimeOutput output;
-  for (int i = 0; i < 12; ++i) output = simulation.step(0.05);
+  for (int i = 0; i < 12; ++i)
+    output = simulation.step(0.05);
   EXPECT_EQ(output.state, sdc::domain::RuntimeState::kFault);
   EXPECT_DOUBLE_EQ(output.control.target_speed, 0.0);
 }
@@ -400,7 +392,8 @@ TEST(SimulationEngine, RunsNormalNonClosedMissionClosedLoop) {
   ASSERT_TRUE(simulation.setMission(mission));
   simulation.setObstacles({});
   sdc::runtime::RuntimeOutput output;
-  for (int i = 0; i < 20; ++i) output = simulation.step(0.05);
+  for (int i = 0; i < 20; ++i)
+    output = simulation.step(0.05);
   EXPECT_EQ(output.state, sdc::domain::RuntimeState::kRunning);
   EXPECT_TRUE(output.planning.success);
   EXPECT_GT(simulation.vehicle().x(), 0.0);

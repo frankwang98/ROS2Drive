@@ -14,10 +14,10 @@ namespace sdc {
 class SteeringController {
  public:
   struct Params {
-    double k_cte  = 1.2;   // 横向误差增益（Stanley 的 k）
-    double k_head = 0.8;   // 航向角误差增益
-    double min_v  = 0.5;   // 防除零的最小速度（m/s）
-    double max_steer = 0.55; // 输出前轮最大转角（弧度），与运动学模型一致
+    double k_cte = 1.2;       // 横向误差增益（Stanley 的 k）
+    double k_head = 0.8;      // 航向角误差增益
+    double min_v = 0.5;       // 防除零的最小速度（m/s）
+    double max_steer = 0.55;  // 输出前轮最大转角（弧度），与运动学模型一致
   };
 
   explicit SteeringController();
@@ -28,14 +28,16 @@ class SteeringController {
   /// @param goal_x, goal_y        期望路径上的目标点（世界坐标）
   /// @param speed                 当前车速（m/s）
   /// @return 前轮转角（弧度，正值左转）
-  double compute(double car_x, double car_y, double car_yaw,
-                 double goal_x, double goal_y, double speed) const;
+  double compute(
+      double car_x, double car_y, double car_yaw, double goal_x, double goal_y, double speed) const;
 
   /// 重置内部状态（无内部状态，保留以统一接口）。
   void reset() {}
 
  private:
-  double clamp(double v, double lo, double hi) const { return std::fmin(hi, std::fmax(lo, v)); }
+  double clamp(double v, double lo, double hi) const {
+    return std::fmin(hi, std::fmax(lo, v));
+  }
 
   Params p_;
 };

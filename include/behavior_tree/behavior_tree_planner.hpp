@@ -45,12 +45,15 @@ class BehaviorTreePlanner {
 
   /// 初始化行为树。xml_path 为空时使用内置教学默认树；生产场景应传外部 XML。
   /// @return true 表示初始化成功（依赖行为树库可用）。
-  bool init(const std::string& xml_path = "",
-            const std::string& tree_id = "RingDemo");
+  bool init(const std::string& xml_path = "", const std::string& tree_id = "RingDemo");
 
   /// 是否已成功初始化。
-  bool initialized() const { return initialized_; }
-  const std::string& last_error() const { return last_error_; }
+  bool initialized() const {
+    return initialized_;
+  }
+  const std::string& last_error() const {
+    return last_error_;
+  }
 
   /// 根据前方障碍物距离运行一次行为树，返回当前应执行的行为。
   /// @param front_distance 前方障碍物距离（米）
@@ -59,14 +62,16 @@ class BehaviorTreePlanner {
   Action tick(double front_distance);
 
   /// 最近一次行为树输出（用于可视化 / 日志）。
-  Action last_action() const { return last_action_; }
+  Action last_action() const {
+    return last_action_;
+  }
 
   /// 行为树 XML 描述（只读，便于外部查看/调试）。
   static const char* xml();
 
  private:
-  void* factory_;   // BT::BehaviorTreeFactory*（与 tree 生命周期一致）
-  void* tree_;      // BT::Tree* 的占位（避免头文件依赖行为树库）
+  void* factory_;  // BT::BehaviorTreeFactory*（与 tree 生命周期一致）
+  void* tree_;     // BT::Tree* 的占位（避免头文件依赖行为树库）
   bool initialized_;
   Action last_action_;
   std::string last_error_;

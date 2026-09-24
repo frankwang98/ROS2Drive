@@ -45,10 +45,14 @@ class AutoDriver {
   AutoDriver();
 
   /// 设置当前地图（决定场景布局与障碍物来源）。
-  void set_map(const ScenarioMap* map) { map_ = map; }
+  void set_map(const ScenarioMap* map) {
+    map_ = map;
+  }
 
   /// 额外的动态障碍物（如环道随机障碍），与地图静态边界一并参与避障。
-  void set_extra_obstacles(const std::vector<Obstacle>& obs) { extra_obstacles_ = obs; }
+  void set_extra_obstacles(const std::vector<Obstacle>& obs) {
+    extra_obstacles_ = obs;
+  }
 
   /// 推进一个仿真步。
   /// @param target 期望行驶目标点（世界坐标）
@@ -70,28 +74,48 @@ class AutoDriver {
   static const char* planning_algorithm_name(PlanningAlgorithm a);
   static const char* lateral_algorithm_name(LateralAlgorithm a);
 
-  void set_planning_algorithm(PlanningAlgorithm a) { planning_algo_ = a; }
-  PlanningAlgorithm planning_algorithm() const { return planning_algo_; }
+  void set_planning_algorithm(PlanningAlgorithm a) {
+    planning_algo_ = a;
+  }
+  PlanningAlgorithm planning_algorithm() const {
+    return planning_algo_;
+  }
 
-  void set_lateral_algorithm(LateralAlgorithm a) { lateral_algo_ = a; }
-  LateralAlgorithm lateral_algorithm() const { return lateral_algo_; }
+  void set_lateral_algorithm(LateralAlgorithm a) {
+    lateral_algo_ = a;
+  }
+  LateralAlgorithm lateral_algorithm() const {
+    return lateral_algo_;
+  }
 
   // ========== 行为树（BehaviorTree.CPP v3）基础行为切换 ==========
   /// 是否启用行为树进行基础行为决策（加速/巡航/减速/停车）。
   /// 启用前会自动初始化行为树；未安装行为树库时退化为规则决策。
   void set_use_behavior_tree(bool on);
-  bool use_behavior_tree() const { return use_behavior_tree_; }
+  bool use_behavior_tree() const {
+    return use_behavior_tree_;
+  }
   /// 最近一次行为树给出的行为（供可视化 / 日志）。
-  Action behavior_tree_action() const { return behavior_tree_.last_action(); }
+  Action behavior_tree_action() const {
+    return behavior_tree_.last_action();
+  }
 
   // 直接访问小车状态（用于可视化 / TF）
-  CarState& car() { return car_; }
-  const CarState& car() const { return car_; }
+  CarState& car() {
+    return car_;
+  }
+  const CarState& car() const {
+    return car_;
+  }
 
-  double speed() const { return speed_; }
+  double speed() const {
+    return speed_;
+  }
 
   /// 手动模式下是否处于倒车（用于可视化箭头）。
-  bool reversing() const { return reversing_; }
+  bool reversing() const {
+    return reversing_;
+  }
 
   /// 重置小车到地图起点并清零状态。
   void reset(const ScenarioMap* map);
@@ -101,19 +125,27 @@ class AutoDriver {
     return candidates_;
   }
 
-  const DecisionMaker& decision_maker() const { return decision_maker_; }
+  const DecisionMaker& decision_maker() const {
+    return decision_maker_;
+  }
 
   /// 访问速度控制器（外部可切换控制算法）。
-  VelocityController& velocity_ctrl() { return velocity_controller_; }
-  const VelocityController& velocity_ctrl() const { return velocity_controller_; }
+  VelocityController& velocity_ctrl() {
+    return velocity_controller_;
+  }
+  const VelocityController& velocity_ctrl() const {
+    return velocity_controller_;
+  }
 
  private:
   /// 按当前规划算法执行局部规划，填充 candidates_。
-  void run_planner(double car_x, double car_y, double car_yaw,
+  void run_planner(double car_x,
+                   double car_y,
+                   double car_yaw,
                    const std::vector<Obstacle>& obstacles);
   /// 按当前横向控制算法计算前轮转角。
-  double compute_steer(double car_x, double car_y, double car_yaw,
-                       const Vec2& target, double speed_cmd, double dt);
+  double compute_steer(
+      double car_x, double car_y, double car_yaw, const Vec2& target, double speed_cmd, double dt);
 
   const ScenarioMap* map_{nullptr};
   CarState car_;
@@ -131,13 +163,15 @@ class AutoDriver {
   bool use_behavior_tree_{false};
 
   double speed_{0.0};
-  bool   reversing_{false};
+  bool reversing_{false};
   std::vector<LatticeTrajectory> candidates_;
   std::vector<Obstacle> extra_obstacles_;
 
   // 避障：返回最近障碍距离（仅考虑车前方）
   double front_obstacle_distance(const std::vector<Obstacle>& obs,
-                                 double car_x, double car_y, double car_yaw) const;
+                                 double car_x,
+                                 double car_y,
+                                 double car_yaw) const;
 
   // 沿环/路径取前视目标点
   static double target_speed_for_action(Action a);

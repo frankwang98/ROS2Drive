@@ -21,18 +21,17 @@ namespace sdc {
 static const char* kActionNames[] = {"ACCEL", "CRUISE", "BRAKE", "STOP"};
 
 HudPanel::HudPanel(QWidget* parent)
-    : rviz_common::Panel(parent)
-    , speed_label_(nullptr)
-    , action_label_(nullptr)
-    , distance_label_(nullptr)
-    , mode_label_(nullptr)
-    , start_button_(nullptr)
-    , pause_button_(nullptr)
-    , clear_button_(nullptr)
-    , mode_button_(nullptr)
-    , reset_button_(nullptr)
-    , ui_timer_(nullptr)
-{
+    : rviz_common::Panel(parent),
+      speed_label_(nullptr),
+      action_label_(nullptr),
+      distance_label_(nullptr),
+      mode_label_(nullptr),
+      start_button_(nullptr),
+      pause_button_(nullptr),
+      clear_button_(nullptr),
+      mode_button_(nullptr),
+      reset_button_(nullptr),
+      ui_timer_(nullptr) {
   auto* root = new QVBoxLayout(this);
   root->setContentsMargins(6, 6, 6, 6);
   root->setSpacing(6);
@@ -94,13 +93,14 @@ HudPanel::HudPanel(QWidget* parent)
   // 允许面板接收键盘焦点（WASD 控制需要）
   setFocusPolicy(Qt::StrongFocus);
   setFocus();
-
 }
 
 void HudPanel::onInitialize() {
-  if (!getDisplayContext()) return;
+  if (!getDisplayContext())
+    return;
   auto ros_node_abs = getDisplayContext()->getRosNodeAbstraction().lock();
-  if (!ros_node_abs) return;
+  if (!ros_node_abs)
+    return;
   node_ = ros_node_abs->get_raw_node();
 
   auto qos = rclcpp::QoS(10);
@@ -112,13 +112,11 @@ void HudPanel::onInitialize() {
       "sdc/front_distance", qos, std::bind(&HudPanel::onDistance, this, std::placeholders::_1));
   auto odom_qos = rclcpp::SensorDataQoS().keep_last(5);
   odom_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
-      "sdc/odometry", odom_qos,
-      std::bind(&HudPanel::onOdometry, this, std::placeholders::_1));
+      "sdc/odometry", odom_qos, std::bind(&HudPanel::onOdometry, this, std::placeholders::_1));
   mode_sub_ = node_->create_subscription<std_msgs::msg::Int32>(
       "sdc/mode", qos, std::bind(&HudPanel::onMode, this, std::placeholders::_1));
   mission_stage_sub_ = node_->create_subscription<std_msgs::msg::String>(
-      "sdc/mission_stage", qos,
-      std::bind(&HudPanel::onMissionStage, this, std::placeholders::_1));
+      "sdc/mission_stage", qos, std::bind(&HudPanel::onMissionStage, this, std::placeholders::_1));
 
   start_pub_ = node_->create_publisher<std_msgs::msg::Bool>("sdc/start", qos);
   pause_pub_ = node_->create_publisher<std_msgs::msg::Bool>("sdc/pause", qos);
@@ -128,7 +126,7 @@ void HudPanel::onInitialize() {
   manual_pub_ = node_->create_publisher<geometry_msgs::msg::Twist>("sdc/manual_cmd", qos);
 
   ui_timer_ = new QTimer(this);
-  ui_timer_->setInterval(50);   // 20Hz 手动指令发送
+  ui_timer_->setInterval(50);  // 20Hz 手动指令发送
   connect(ui_timer_, &QTimer::timeout, this, &HudPanel::onStatusTimer);
   ui_timer_->start();
 }
@@ -141,9 +139,15 @@ HudPanel::~HudPanel() {
   }
 }
 
-void HudPanel::onSpeed(const std_msgs::msg::Float64::SharedPtr msg) { speed_ = msg->data; }
-void HudPanel::onAction(const std_msgs::msg::Float64::SharedPtr msg) { action_id_ = static_cast<int>(msg->data); }
-void HudPanel::onDistance(const std_msgs::msg::Float64::SharedPtr msg) { distance_ = msg->data; }
+void HudPanel::onSpeed(const std_msgs::msg::Float64::SharedPtr msg) {
+  speed_ = msg->data;
+}
+void HudPanel::onAction(const std_msgs::msg::Float64::SharedPtr msg) {
+  action_id_ = static_cast<int>(msg->data);
+}
+void HudPanel::onDistance(const std_msgs::msg::Float64::SharedPtr msg) {
+  distance_ = msg->data;
+}
 void HudPanel::onOdometry(const nav_msgs::msg::Odometry::SharedPtr msg) {
   pose_x_ = msg->pose.pose.position.x;
   pose_y_ = msg->pose.pose.position.y;
@@ -165,54 +169,88 @@ void HudPanel::onMissionStage(const std_msgs::msg::String::SharedPtr msg) {
 }
 
 void HudPanel::onStatusTimer() {
-  if (speed_label_)  speed_label_->setText(QString("SPEED  %1 m/s").arg(speed_, 0, 'f', 1));
+  if (speed_label_)
+    speed_label_->setText(QString("SPEED  %1 m/s").arg(speed_, 0, 'f', 1));
   if (action_label_) {
     const char* name = "UNKNOWN";
-    if (action_id_ >= 0 && action_id_ <= 3) name = kActionNames[action_id_];
+    if (action_id_ >= 0 && action_id_ <= 3)
+      name = kActionNames[action_id_];
     action_label_->setText(QString("ACTION %1").arg(name));
   }
-  if (distance_label_) distance_label_->setText(QString("FRONT  %1 m").arg(distance_, 0, 'f', 1));
-  if (pause_button_) pause_button_->setText(paused_ ? "RESUME" : "PAUSE");
+  if (distance_label_)
+    distance_label_->setText(QString("FRONT  %1 m").arg(distance_, 0, 'f', 1));
+  if (pause_button_)
+    pause_button_->setText(paused_ ? "RESUME" : "PAUSE");
 
   // 手动模式下持续发送指令（保证松开后自动回中）
-  if (manual_) publishManualCmd();
+  if (manual_)
+    publishManualCmd();
 }
 
 // ---- 键盘事件（WASD）----
 void HudPanel::keyPressEvent(QKeyEvent* event) {
-  if (manual_) updateKey(event->key(), true);
+  if (manual_)
+    updateKey(event->key(), true);
   QWidget::keyPressEvent(event);
 }
 
 void HudPanel::keyReleaseEvent(QKeyEvent* event) {
-  if (manual_) updateKey(event->key(), false);
+  if (manual_)
+    updateKey(event->key(), false);
   QWidget::keyReleaseEvent(event);
 }
 
 void HudPanel::updateKey(int key, bool pressed) {
   bool changed = false;
   switch (key) {
-    case Qt::Key_W: if (key_w_ != pressed) { key_w_ = pressed; changed = true; } break;
-    case Qt::Key_S: if (key_s_ != pressed) { key_s_ = pressed; changed = true; } break;
-    case Qt::Key_A: if (key_a_ != pressed) { key_a_ = pressed; changed = true; } break;
-    case Qt::Key_D: if (key_d_ != pressed) { key_d_ = pressed; changed = true; } break;
-    default: break;
+    case Qt::Key_W:
+      if (key_w_ != pressed) {
+        key_w_ = pressed;
+        changed = true;
+      }
+      break;
+    case Qt::Key_S:
+      if (key_s_ != pressed) {
+        key_s_ = pressed;
+        changed = true;
+      }
+      break;
+    case Qt::Key_A:
+      if (key_a_ != pressed) {
+        key_a_ = pressed;
+        changed = true;
+      }
+      break;
+    case Qt::Key_D:
+      if (key_d_ != pressed) {
+        key_d_ = pressed;
+        changed = true;
+      }
+      break;
+    default:
+      break;
   }
-  if (changed) publishManualCmd();
+  if (changed)
+    publishManualCmd();
 }
 
 void HudPanel::publishManualCmd() {
-  if (!manual_pub_) return;
+  if (!manual_pub_)
+    return;
   geometry_msgs::msg::Twist twist;
   // 油门：W 前进(+1)，S 倒车(-1)；同时按则相互抵消
   double throttle = 0.0;
-  if (key_w_) throttle += 1.0;
-  if (key_s_) throttle -= 1.0;
+  if (key_w_)
+    throttle += 1.0;
+  if (key_s_)
+    throttle -= 1.0;
   // 转向：A 左(+1)，D 右(-1)
   // （阿克曼模型 steer>0 => yaw 增大 => 左转，故左=正转角，右=负转角）
   double steer = 0.0;
-  if (key_a_) steer += 1.0;
-  if (key_d_) steer -= 1.0;
+  if (key_a_)
+    steer += 1.0;
+  if (key_d_)
+    steer -= 1.0;
   twist.linear.x = throttle;
   twist.angular.z = steer;
   manual_pub_->publish(twist);
@@ -220,7 +258,8 @@ void HudPanel::publishManualCmd() {
 
 // ---- 控制按钮 ----
 void HudPanel::onStart() {
-  auto msg = std_msgs::msg::Bool(); msg.data = true;
+  auto msg = std_msgs::msg::Bool();
+  msg.data = true;
   start_pub_->publish(msg);
   paused_ = false;
   onStatusTimer();
@@ -228,19 +267,22 @@ void HudPanel::onStart() {
 
 void HudPanel::onTogglePause() {
   paused_ = !paused_;
-  auto msg = std_msgs::msg::Bool(); msg.data = paused_;
+  auto msg = std_msgs::msg::Bool();
+  msg.data = paused_;
   pause_pub_->publish(msg);
   onStatusTimer();
 }
 
 void HudPanel::onClearTrail() {
-  auto msg = std_msgs::msg::Bool(); msg.data = true;
+  auto msg = std_msgs::msg::Bool();
+  msg.data = true;
   clear_pub_->publish(msg);
 }
 
 void HudPanel::onToggleMode() {
   manual_ = !manual_;
-  auto msg = std_msgs::msg::Int32(); msg.data = manual_ ? 1 : 0;
+  auto msg = std_msgs::msg::Int32();
+  msg.data = manual_ ? 1 : 0;
   set_mode_pub_->publish(msg);
   if (!manual_) {
     key_w_ = key_s_ = key_a_ = key_d_ = false;
@@ -250,12 +292,17 @@ void HudPanel::onToggleMode() {
 }
 
 void HudPanel::onResetCar() {
-  auto msg = std_msgs::msg::Bool(); msg.data = true;
+  auto msg = std_msgs::msg::Bool();
+  msg.data = true;
   reset_pub_->publish(msg);
 }
 
-void HudPanel::load(const rviz_common::Config& config) { Panel::load(config); }
-void HudPanel::save(rviz_common::Config config) const { Panel::save(config); }
+void HudPanel::load(const rviz_common::Config& config) {
+  Panel::load(config);
+}
+void HudPanel::save(rviz_common::Config config) const {
+  Panel::save(config);
+}
 
 }  // namespace sdc
 

@@ -9,7 +9,10 @@ LegacyPlannerAdapter::LegacyPlannerAdapter(Type type) : type_(type) {}
 
 PlanningResult LegacyPlannerAdapter::plan(const PlanningInput& input) {
   PlanningResult result;
-  if (!input.vehicle.localized) { result.reason = "vehicle_not_localized"; return result; }
+  if (!input.vehicle.localized) {
+    result.reason = "vehicle_not_localized";
+    return result;
+  }
   std::vector<sdc::Obstacle> obstacles;
   obstacles.reserve(input.obstacles.size());
   for (const auto& obstacle : input.obstacles)
@@ -17,13 +20,14 @@ PlanningResult LegacyPlannerAdapter::plan(const PlanningInput& input) {
 
   std::vector<LatticeTrajectory> candidates;
   if (type_ == Type::kLattice) {
-    lattice_.plan(input.vehicle.pose.x, input.vehicle.pose.y,
-                  input.vehicle.pose.yaw, obstacles, candidates);
+    lattice_.plan(
+        input.vehicle.pose.x, input.vehicle.pose.y, input.vehicle.pose.yaw, obstacles, candidates);
   } else {
-    em_.plan(input.vehicle.pose.x, input.vehicle.pose.y,
-             input.vehicle.pose.yaw, obstacles, candidates);
+    em_.plan(
+        input.vehicle.pose.x, input.vehicle.pose.y, input.vehicle.pose.yaw, obstacles, candidates);
   }
-  const auto selected = std::find_if(candidates.begin(), candidates.end(),
+  const auto selected = std::find_if(candidates.begin(),
+                                     candidates.end(),
                                      [](const auto& candidate) { return candidate.selected; });
   if (selected == candidates.end() || selected->path.size() < 2) {
     result.reason = "legacy_planner_no_candidate";
@@ -31,8 +35,8 @@ PlanningResult LegacyPlannerAdapter::plan(const PlanningInput& input) {
   }
   result.trajectory.frame_id = "map";
   result.trajectory.stamp_s = input.now_s;
-  const double speed = std::min(input.speed_limit,
-                                selected->speed > 0.0 ? selected->speed : input.speed_limit);
+  const double speed =
+      std::min(input.speed_limit, selected->speed > 0.0 ? selected->speed : input.speed_limit);
   for (std::size_t i = 0; i < selected->path.size(); ++i) {
     domain::Waypoint waypoint;
     waypoint.pose.x = selected->path[i].x;
@@ -42,8 +46,7 @@ PlanningResult LegacyPlannerAdapter::plan(const PlanningInput& input) {
       waypoint.pose.yaw = std::atan2(selected->path[i + 1].y - selected->path[i].y,
                                      selected->path[i + 1].x - selected->path[i].x);
     else
-      waypoint.pose.yaw = i > 0 ? result.trajectory.points.back().pose.yaw
-                                : input.vehicle.pose.yaw;
+      waypoint.pose.yaw = i > 0 ? result.trajectory.points.back().pose.yaw : input.vehicle.pose.yaw;
     waypoint.velocity = speed;
     waypoint.relative_time = i * 0.1;
     result.trajectory.points.push_back(waypoint);

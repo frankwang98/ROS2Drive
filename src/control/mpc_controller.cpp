@@ -7,8 +7,10 @@ namespace sdc {
 
 namespace {
 double norm_angle(double a) {
-  while (a > M_PI) a -= 2.0 * M_PI;
-  while (a < -M_PI) a += 2.0 * M_PI;
+  while (a > M_PI)
+    a -= 2.0 * M_PI;
+  while (a < -M_PI)
+    a += 2.0 * M_PI;
   return a;
 }
 }  // namespace
@@ -17,8 +19,10 @@ MpcController::MpcController() : p_(Params()) {}
 
 MpcController::MpcController(const Params& p) : p_(p) {}
 
-void MpcController::rollout(const State& s0, double speed,
-                            const std::vector<double>& u, double dt,
+void MpcController::rollout(const State& s0,
+                            double speed,
+                            const std::vector<double>& u,
+                            double dt,
                             std::vector<State>& traj) const {
   int N = p_.horizon;
   double L = p_.wheelbase > 1e-6 ? p_.wheelbase : 2.0;
@@ -36,9 +40,8 @@ void MpcController::rollout(const State& s0, double speed,
   }
 }
 
-double MpcController::cost(const State& s0, double speed,
-                           const std::vector<double>& u, double dt,
-                           double goal_yaw) const {
+double MpcController::cost(
+    const State& s0, double speed, const std::vector<double>& u, double dt, double goal_yaw) const {
   int N = p_.horizon;
   std::vector<State> traj;
   rollout(s0, speed, u, dt, traj);
@@ -63,8 +66,12 @@ double MpcController::cost(const State& s0, double speed,
   return c;
 }
 
-double MpcController::compute(double car_x, double car_y, double car_yaw,
-                              double goal_x, double goal_y, double speed,
+double MpcController::compute(double car_x,
+                              double car_y,
+                              double car_yaw,
+                              double goal_x,
+                              double goal_y,
+                              double speed,
                               double dt) {
   int N = p_.horizon;
   double dt_pred = p_.dt;
@@ -92,13 +99,10 @@ double MpcController::compute(double car_x, double car_y, double car_yaw,
     for (int k = 0; k < N; ++k) {
       u[static_cast<size_t>(k)] -= p_.step_size * grad[static_cast<size_t>(k)];
       // 投影回可行域（转向角 + 变化率约束）
-      u[static_cast<size_t>(k)] = clamp(u[static_cast<size_t>(k)],
-                                        -p_.max_steer, p_.max_steer);
+      u[static_cast<size_t>(k)] = clamp(u[static_cast<size_t>(k)], -p_.max_steer, p_.max_steer);
       if (k > 0) {
-        double lo = clamp(u[static_cast<size_t>(k - 1)] - max_d_steer,
-                          -p_.max_steer, p_.max_steer);
-        double hi = clamp(u[static_cast<size_t>(k - 1)] + max_d_steer,
-                          -p_.max_steer, p_.max_steer);
+        double lo = clamp(u[static_cast<size_t>(k - 1)] - max_d_steer, -p_.max_steer, p_.max_steer);
+        double hi = clamp(u[static_cast<size_t>(k - 1)] + max_d_steer, -p_.max_steer, p_.max_steer);
         u[static_cast<size_t>(k)] = clamp(u[static_cast<size_t>(k)], lo, hi);
       }
     }

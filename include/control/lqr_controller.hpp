@@ -24,15 +24,15 @@ namespace sdc {
 class LqrController {
  public:
   struct Params {
-    double q_e      = 2.0;   // 横向误差权重
-    double q_e_dot  = 0.5;   // 横向误差变化率权重
-    double q_d_psi  = 3.0;   // 航向角误差权重
-    double r_steer  = 1.0;   // 转向控制量权重
-    double dt       = 0.05;  // 离散化步长（秒）
-    double wheelbase = 2.0;  // 轴距（米）
-    double max_steer  = 0.55; // 输出最大前轮转角（弧度）
-    double max_steer_rate = 0.9; // 前轮最大转角变化率（rad/s），抑制"画龙"
-    double min_v     = 0.5;  // 防除零的最小车速（m/s）
+    double q_e = 2.0;             // 横向误差权重
+    double q_e_dot = 0.5;         // 横向误差变化率权重
+    double q_d_psi = 3.0;         // 航向角误差权重
+    double r_steer = 1.0;         // 转向控制量权重
+    double dt = 0.05;             // 离散化步长（秒）
+    double wheelbase = 2.0;       // 轴距（米）
+    double max_steer = 0.55;      // 输出最大前轮转角（弧度）
+    double max_steer_rate = 0.9;  // 前轮最大转角变化率（rad/s），抑制"画龙"
+    double min_v = 0.5;           // 防除零的最小车速（m/s）
   };
 
   explicit LqrController();
@@ -43,11 +43,13 @@ class LqrController {
   /// @param goal_x, goal_y        期望路径上的目标点（世界坐标）
   /// @param speed                 当前车速（m/s）
   /// @return 前轮转角（弧度，正值左转）
-  double compute(double car_x, double car_y, double car_yaw,
-                 double goal_x, double goal_y, double speed);
+  double compute(
+      double car_x, double car_y, double car_yaw, double goal_x, double goal_y, double speed);
 
   /// 重置内部状态（限幅缓存的转角）。
-  void reset() { last_steer_ = 0.0; }
+  void reset() {
+    last_steer_ = 0.0;
+  }
 
  private:
   /// 迭代求解离散代数黎卡提方程，返回反馈增益 K[3]（x = [e, e_dot, d_psi]）。
@@ -57,7 +59,7 @@ class LqrController {
   }
 
   Params p_;
-  double last_steer_{0.0};   // 上一时刻输出转角，用于限速
+  double last_steer_{0.0};  // 上一时刻输出转角，用于限速
 };
 
 }  // namespace sdc

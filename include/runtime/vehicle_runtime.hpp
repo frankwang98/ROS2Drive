@@ -9,7 +9,12 @@
 #include "safety/safety_manager.hpp"
 
 namespace sdc::runtime {
-struct RuntimeOutput { domain::RuntimeState state{domain::RuntimeState::kInit}; behavior::BehaviorDecision behavior; planning::PlanningResult planning; domain::ControlCommand control; };
+struct RuntimeOutput {
+  domain::RuntimeState state{domain::RuntimeState::kInit};
+  behavior::BehaviorDecision behavior;
+  planning::PlanningResult planning;
+  domain::ControlCommand control;
+};
 
 class VehicleRuntime {
  public:
@@ -19,28 +24,41 @@ class VehicleRuntime {
                  planning::VelocityPlanner velocity_planner,
                  std::unique_ptr<behavior::BehaviorManager> behavior_manager =
                      std::make_unique<behavior::PassthroughBehaviorManager>());
-  bool setMission(domain::Mission mission, bool preempt = false,
-                  double now_s = 0.0);
+  bool setMission(domain::Mission mission, bool preempt = false, double now_s = 0.0);
   bool pause();
   bool resume();
   bool cancelMission();
   void requestEmergencyStop(bool enabled);
-  bool acknowledgeSafetyRecovery() { return safety_.acknowledgeRecovery(); }
-  bool safetyRecoveryRequired() const { return safety_.recoveryRequired(); }
-  bool safetyRecoveryReady() const { return safety_.recoveryReady(); }
+  bool acknowledgeSafetyRecovery() {
+    return safety_.acknowledgeRecovery();
+  }
+  bool safetyRecoveryRequired() const {
+    return safety_.recoveryRequired();
+  }
+  bool safetyRecoveryReady() const {
+    return safety_.recoveryReady();
+  }
   bool setBehaviorManager(std::unique_ptr<behavior::BehaviorManager> manager);
   bool setPlanner(std::unique_ptr<planning::Planner> planner);
   bool setController(std::unique_ptr<control::Controller> controller);
   void setVelocityPlanner(planning::VelocityPlanner planner);
   void setSafetyManager(safety::SafetyManager manager);
   void updateVehicleState(domain::VehicleState state);
-  void updateObstacles(std::vector<domain::Obstacle> obstacles,
-                       double stamp_s = 0.0);
+  void updateObstacles(std::vector<domain::Obstacle> obstacles, double stamp_s = 0.0);
   RuntimeOutput step(double now_s, double dt_s);
-  const RuntimeOutput& output() const { return output_; }
-  const mission::MissionManager& missions() const { return missions_; }
-  const safety::FaultManager& faults() const { return safety_.faults(); }
-  const safety::SafetyManager& safety() const { return safety_; }
+  const RuntimeOutput& output() const {
+    return output_;
+  }
+  const mission::MissionManager& missions() const {
+    return missions_;
+  }
+  const safety::FaultManager& faults() const {
+    return safety_.faults();
+  }
+  const safety::SafetyManager& safety() const {
+    return safety_;
+  }
+
  private:
   std::unique_ptr<planning::Planner> planner_;
   std::unique_ptr<control::Controller> controller_;

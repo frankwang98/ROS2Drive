@@ -105,7 +105,8 @@
 - [~] core unit 与版本化 Runtime record/replay 已建立；文件回放回归阈值和 ROS replay CLI 待完成
 - [x] 已建立正常非闭合路线闭环、动态障碍规划、定位丢失、规划失败、感知断流和急停回归测试；待用户编译执行确认
 - [x] 架构边界、Runtime 时序图、接口契约、三类场景扩展与故障指南
-- [~] GitHub Actions 已覆盖 rosdep/build/unit test；format/static analysis/integration 待补
+- [x] 增加项目级 `.clang-format`（2 空格、100 列、C++17）及 `scripts/format_cpp.sh`；支持格式化和仅检查模式
+- [~] GitHub Actions 已覆盖 rosdep/build/unit test；clang-format check、clang-tidy/static analysis 与 integration 待补
 
 ## 暂不做
 

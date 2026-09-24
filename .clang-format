@@ -1,0 +1,24 @@
+---
+# Project-wide C++ formatting for the ROS 2 autonomy runtime.
+# Kept deliberately close to the existing two-space style so adoption creates
+# reviewable diffs instead of a wholesale stylistic rewrite.
+BasedOnStyle: Google
+Language: Cpp
+Standard: c++17
+IndentWidth: 2
+TabWidth: 2
+UseTab: Never
+ColumnLimit: 100
+PointerAlignment: Left
+ReferenceAlignment: Left
+BreakBeforeBraces: Attach
+AllowShortBlocksOnASingleLine: Empty
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+BinPackArguments: false
+BinPackParameters: false
+SortIncludes: false
+SpaceBeforeParens: ControlStatements
+NamespaceIndentation: None
+...

@@ -105,14 +105,14 @@ class HudPanel : public rviz_common::Panel {
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr manual_pub_;
 
   // ---- 驾驶状态 ----
-  bool   paused_{false};
-  bool   manual_{false};        // 当前是否为手动模式
+  bool paused_{false};
+  bool manual_{false};  // 当前是否为手动模式
   double speed_{0.0};
   double distance_{0.0};
   double pose_x_{0.0};
   double pose_y_{0.0};
   double pose_z_{0.0};
-  int    action_id_{0};
+  int action_id_{0};
   std::string mission_stage_{"TRANSIT"};
 
   // WASD 键位状态

@@ -13,6 +13,8 @@ class ReferencePathPlanner final : public Planner {
   ReferencePathPlanner();
   explicit ReferencePathPlanner(Config config);
   PlanningResult plan(const PlanningInput& input) override;
- private: Config config_;
+
+ private:
+  Config config_;
 };
 }  // namespace sdc::planning

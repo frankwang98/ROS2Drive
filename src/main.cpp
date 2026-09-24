@@ -6,14 +6,13 @@
 
 namespace {
 
-constexpr double kDt = 0.1;           // 模拟时间步长（秒）
-constexpr int kSteps = 100;           // 模拟步数
-constexpr double kCruiseTarget = 2.0; // 期望巡航速度（m/s）
+constexpr double kDt = 0.1;            // 模拟时间步长（秒）
+constexpr int kSteps = 100;            // 模拟步数
+constexpr double kCruiseTarget = 2.0;  // 期望巡航速度（m/s）
 
 void print_header() {
   std::printf("========== Autonomous Vehicle Demo ==========\n");
-  std::printf("Perception -> Decision -> Control | time step %.1fs, %d steps\n\n",
-              kDt, kSteps);
+  std::printf("Perception -> Decision -> Control | time step %.1fs, %d steps\n\n", kDt, kSteps);
 }
 
 void print_state(const sdc::Car& car, int step) {
@@ -39,7 +38,7 @@ int main() {
   }
 
   std::printf("\n========== Simulation Complete ==========\n");
-  std::printf("total distance: %.2f m | final speed: %.2f m/s\n",
-              car.distance_traveled(), car.speed());
+  std::printf(
+      "total distance: %.2f m | final speed: %.2f m/s\n", car.distance_traveled(), car.speed());
   return 0;
 }

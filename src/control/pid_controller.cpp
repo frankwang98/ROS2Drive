@@ -20,8 +20,7 @@ double PidController::compute(double setpoint, double feedback) {
 
   // 积分项（条件积分：只在误差不大时累积，避免积分饱和）
   integral_ += error * p_.dt;
-  integral_ = std::max(-p_.integral_limit,
-                       std::min(p_.integral_limit, integral_));
+  integral_ = std::max(-p_.integral_limit, std::min(p_.integral_limit, integral_));
 
   // 微分项
   double derivative = 0.0;

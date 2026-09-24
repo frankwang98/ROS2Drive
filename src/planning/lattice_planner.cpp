@@ -10,13 +10,11 @@ LatticePlanner::LatticePlanner(const LatticeParams& p) : p_(p) {}
 
 Vec2 LatticePlanner::center_at(double s0_angle, double s) const {
   double theta = s0_angle + s / p_.ring_radius;
-  return Vec2{p_.ring_radius * std::cos(theta),
-              p_.ring_radius * std::sin(theta)};
+  return Vec2{p_.ring_radius * std::cos(theta), p_.ring_radius * std::sin(theta)};
 }
 
-double LatticePlanner::obstacle_cost(
-    const LatticeTrajectory& traj,
-    const std::vector<Obstacle>& obstacles) const {
+double LatticePlanner::obstacle_cost(const LatticeTrajectory& traj,
+                                     const std::vector<Obstacle>& obstacles) const {
   double cost = 0.0;
   for (const auto& ob : obstacles) {
     double min_d = std::numeric_limits<double>::infinity();
@@ -24,21 +22,23 @@ double LatticePlanner::obstacle_cost(
       double dx = pt.x - ob.position.x;
       double dy = pt.y - ob.position.y;
       double d = std::sqrt(dx * dx + dy * dy) - ob.radius;
-      if (d < min_d) min_d = d;
+      if (d < min_d)
+        min_d = d;
     }
     if (min_d <= 0.0) {
       // 穿障：极大代价
       cost += 1e5;
     } else if (min_d < p_.obstacle_safe_dist) {
       // 越靠近障碍物代价越大
-      cost += p_.obstacle_cost_gain *
-              std::pow(1.0 - min_d / p_.obstacle_safe_dist, 2);
+      cost += p_.obstacle_cost_gain * std::pow(1.0 - min_d / p_.obstacle_safe_dist, 2);
     }
   }
   return cost;
 }
 
-void LatticePlanner::plan(double pose_x, double pose_y, double yaw,
+void LatticePlanner::plan(double pose_x,
+                          double pose_y,
+                          double yaw,
                           const std::vector<Obstacle>& obstacles,
                           std::vector<LatticeTrajectory>& out) const {
   out.clear();
@@ -50,14 +50,14 @@ void LatticePlanner::plan(double pose_x, double pose_y, double yaw,
 
   // 横向候选偏移列表（从负到正）
   std::vector<double> lat_offsets;
-  for (double r = -p_.max_lateral; r <= p_.max_lateral + 1e-9;
-       r += p_.lateral_step) {
+  for (double r = -p_.max_lateral; r <= p_.max_lateral + 1e-9; r += p_.lateral_step) {
     lat_offsets.push_back(r);
   }
-  if (lat_offsets.empty()) lat_offsets.push_back(0.0);
+  if (lat_offsets.empty())
+    lat_offsets.push_back(0.0);
 
   double best_cost = std::numeric_limits<double>::infinity();
-  int    best_idx = -1;
+  int best_idx = -1;
 
   for (size_t i = 0; i < lat_offsets.size(); ++i) {
     double r_target = lat_offsets[i];
@@ -75,14 +75,12 @@ void LatticePlanner::plan(double pose_x, double pose_y, double yaw,
       double nx = std::cos(theta);  // 径向向外
       double ny = std::sin(theta);
 
-      Vec2 center{ p_.ring_radius * std::cos(theta),
-                   p_.ring_radius * std::sin(theta) };
-      traj.path.push_back(Vec2{ center.x + r * nx, center.y + r * ny });
+      Vec2 center{p_.ring_radius * std::cos(theta), p_.ring_radius * std::sin(theta)};
+      traj.path.push_back(Vec2{center.x + r * nx, center.y + r * ny});
     }
 
     // 代价 = 障碍物代价 + 横向偏移代价
-    traj.cost = obstacle_cost(traj, obstacles)
-              + p_.lateral_cost_gain * std::fabs(r_target);
+    traj.cost = obstacle_cost(traj, obstacles) + p_.lateral_cost_gain * std::fabs(r_target);
 
     // 建议速度：靠近障碍物减速，否则按最大速度
     double min_d = std::numeric_limits<double>::infinity();
@@ -91,11 +89,12 @@ void LatticePlanner::plan(double pose_x, double pose_y, double yaw,
         double dx = pt.x - ob.position.x;
         double dy = pt.y - ob.position.y;
         double d = std::sqrt(dx * dx + dy * dy) - ob.radius;
-        if (d < min_d) min_d = d;
+        if (d < min_d)
+          min_d = d;
       }
     }
-    traj.clearance = (min_d == std::numeric_limits<double>::infinity())
-                         ? p_.obstacle_safe_dist : min_d;
+    traj.clearance =
+        (min_d == std::numeric_limits<double>::infinity()) ? p_.obstacle_safe_dist : min_d;
     // 沿轨迹的最小间距小于小车半宽则视为不可通行（相撞）。
     // 注意：这里的 clearance 是「沿所选路径」的最小距离，而非车正前方直线距离，
     // 因此窄门侧墙/绕桩桩桶这类可绕行/可穿过的障碍不会被误判为堵死。

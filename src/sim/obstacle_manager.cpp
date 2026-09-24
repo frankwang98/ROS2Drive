@@ -5,8 +5,7 @@
 
 namespace sdc {
 
-ObstacleManager::ObstacleManager(double ring_radius, double road_width,
-                                 unsigned seed)
+ObstacleManager::ObstacleManager(double ring_radius, double road_width, unsigned seed)
     : ring_radius_(ring_radius),
       road_width_(road_width),
       half_lane_(road_width_ / 2.0 * 0.8),
@@ -19,9 +18,9 @@ ObstacleManager::ObstacleManager(double ring_radius, double road_width,
 
 void ObstacleManager::spawn() {
   RingObstacle ob;
-  ob.angle   = angle_dist_(rng_);
+  ob.angle = angle_dist_(rng_);
   ob.lateral = lateral_dist_(rng_);
-  ob.radius  = radius_dist_(rng_);
+  ob.radius = radius_dist_(rng_);
   ob.remaining = lifetime_dist_(rng_);
 
   // 世界坐标：中心线 + 横向偏移（径向向外为正）
@@ -41,10 +40,10 @@ void ObstacleManager::update(double dt) {
   for (auto& ob : obstacles_) {
     ob.remaining -= dt;
   }
-  obstacles_.erase(
-      std::remove_if(obstacles_.begin(), obstacles_.end(),
-                     [](const RingObstacle& ob) { return ob.remaining <= 0.0; }),
-      obstacles_.end());
+  obstacles_.erase(std::remove_if(obstacles_.begin(),
+                                  obstacles_.end(),
+                                  [](const RingObstacle& ob) { return ob.remaining <= 0.0; }),
+                   obstacles_.end());
 }
 
 std::vector<Obstacle> ObstacleManager::to_planner_obstacles() const {

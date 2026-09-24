@@ -10,7 +10,11 @@ class FaultManager {
   bool hasError() const;
   bool hasFatal() const;
   bool hasWarning() const;
-  const std::vector<domain::Fault>& faults() const { return faults_; }
- private: std::vector<domain::Fault> faults_;
+  const std::vector<domain::Fault>& faults() const {
+    return faults_;
+  }
+
+ private:
+  std::vector<domain::Fault> faults_;
 };
 }  // namespace sdc::safety

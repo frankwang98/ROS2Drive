@@ -246,7 +246,17 @@ colcon test-result --verbose
 ```
 
 `.github/workflows/ci.yml` 提供 ROS 2 Jazzy 容器中的 rosdep、构建和测试门禁；
-尚未在本地执行，也尚未加入 clang-format/clang-tidy 门禁。
+尚未在本地执行。C/C++ 代码风格由仓库根目录的 `.clang-format` 统一；先检查、确认
+diff 后再格式化，避免把功能修改和大范围格式变化混进同一个提交：
+
+```bash
+# 仅检查，不改文件
+bash scripts/format_cpp.sh --check
+# 统一 include/、src/、test/ 下的手写 C/C++ 文件
+bash scripts/format_cpp.sh
+```
+
+下一步可将 `bash scripts/format_cpp.sh --check` 加入 CI；`clang-tidy` 仍待单独配置。
 
 ## Record / Replay
 

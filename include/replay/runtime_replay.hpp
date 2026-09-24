@@ -15,14 +15,20 @@ struct ReplayFrame {
 class RuntimeRecorder {
  public:
   void record(ReplayFrame frame);
-  void clear() { frames_.clear(); }
-  const std::vector<ReplayFrame>& frames() const { return frames_; }
+  void clear() {
+    frames_.clear();
+  }
+  const std::vector<ReplayFrame>& frames() const {
+    return frames_;
+  }
   // Saves SDC_REPLAY_V2 (with elevation); load also accepts V1 recordings.
   bool save(const std::string& path) const;
   bool load(const std::string& path);
+
  private:
   std::vector<ReplayFrame> frames_;
 };
 runtime::RuntimeOutput replayFrame(runtime::VehicleRuntime& runtime,
-                                   const ReplayFrame& frame, double dt_s);
+                                   const ReplayFrame& frame,
+                                   double dt_s);
 }  // namespace sdc::replay
