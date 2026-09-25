@@ -36,7 +36,8 @@ TEST(ScenarioDefinition, RingScenarioIsPortableAndValid) {
   EXPECT_EQ(definition.default_mission.type, MissionType::kFollowRoute);
   const auto route = definition.referenceRoute(reason);
   EXPECT_GT(route.size(), 100u);
-  EXPECT_NEAR(definition.initial_pose.x, 26.0, 1e-9);
+  // The default route follows the inner left lane of the 26 m ring.
+  EXPECT_NEAR(definition.initial_pose.x, 24.5, 1e-9);
 }
 
 TEST(ScenarioDefinition, MiningHaulChangesRouteObstaclesAndProfile) {
@@ -48,7 +49,8 @@ TEST(ScenarioDefinition, MiningHaulChangesRouteObstaclesAndProfile) {
   EXPECT_EQ(definition.default_mission.type, MissionType::kFollowRoute);
   const auto route = definition.referenceRoute(reason);
   EXPECT_GE(route.size(), 5u);
-  EXPECT_FALSE(definition.static_obstacles.empty());
+  // The mining baseline isolates mission and route tracking before obstacle injection.
+  EXPECT_TRUE(definition.static_obstacles.empty());
   EXPECT_LT(definition.vehicle_constraints.maximum_speed, 2.0);
   EXPECT_NEAR(definition.initial_pose.x, -42.0, 1e-9);
   EXPECT_GT(route.back().z, route.front().z);
@@ -177,7 +179,8 @@ TEST(RingLanePlanner, RejectsTrajectoryThatWouldCollide) {
   input.speed_limit = 1.5;
   const auto result = planner.plan(input);
   EXPECT_FALSE(result.success);
-  EXPECT_EQ(result.reason, "ring_lane_collision_predicted");
+  // The reason includes obstacle, point and clearance diagnostics.
+  EXPECT_EQ(result.reason.find("ring_lane_collision_predicted"), 0u);
 }
 
 TEST(RingLanePlanner, DoesNotStopForPassedLeftLaneObstacle) {
