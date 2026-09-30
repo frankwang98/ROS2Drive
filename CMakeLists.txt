@@ -136,6 +136,9 @@ if(BUILD_TESTING)
   add_executable(sdc_ring_frenet_tests test/ring_frenet_test.cpp)
   target_link_libraries(sdc_ring_frenet_tests sdc_runtime_core)
   add_test(NAME sdc_ring_frenet_tests COMMAND sdc_ring_frenet_tests)
+  add_executable(sdc_manual_drive_tests test/manual_drive_test.cpp)
+  target_link_libraries(sdc_manual_drive_tests sdc_runtime_core)
+  add_test(NAME sdc_manual_drive_tests COMMAND sdc_manual_drive_tests)
 endif()
 
 # ---- 旧版单机 demo（保留，方便对比）----
@@ -243,4 +246,3 @@ install(DIRECTORY launch rviz config docs
 )
 
 ament_package()
-

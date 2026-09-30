@@ -36,7 +36,9 @@ class VelocityController {
   }
 
   /// 根据目标速度与当前速度计算下一时刻速度（m/s）。
-  double update(double target_speed, double current_speed, double dt);
+  // Manual driving can opt into signed velocity; autonomous callers retain
+  // the existing forward-only PID/ramp behavior by default.
+  double update(double target_speed, double current_speed, double dt, bool allow_reverse = false);
 
   /// 重置内部状态。
   void reset();

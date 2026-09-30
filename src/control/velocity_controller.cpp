@@ -30,13 +30,14 @@ void VelocityController::reset() {
   pid_.reset();
 }
 
-double VelocityController::update(double target_speed, double current_speed, double dt) {
+double VelocityController::update(double target_speed, double current_speed, double dt,
+                                  bool allow_reverse) {
   switch (algo_) {
     case VelocityAlgorithm::kPid: {
       // PID 以加速度为控制量，对当前速度积分得到下一时刻速度
       double accel = pid_.compute(target_speed, current_speed);
       double next = current_speed + accel * dt;
-      return std::max(0.0, next);
+      return allow_reverse ? next : std::max(0.0, next);
     }
     case VelocityAlgorithm::kBangBang: {
       // 以最大加速度（或最大减速度）冲向目标速度
@@ -59,7 +60,7 @@ double VelocityController::update(double target_speed, double current_speed, dou
       } else {
         next = std::max(target_speed, current_speed - max_delta);
       }
-      return std::max(0.0, next);
+      return allow_reverse ? next : std::max(0.0, next);
     }
   }
 }

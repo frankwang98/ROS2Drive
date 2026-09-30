@@ -100,6 +100,8 @@ void HudPanel::initializeRos(rclcpp::Node::SharedPtr node) {
 }
 
 HudPanel::~HudPanel() {
+  key_w_ = key_s_ = key_a_ = key_d_ = false;
+  if (manual_) publishManualCmd();
   if (ui_timer_) {
     ui_timer_->stop();
     delete ui_timer_;
@@ -324,4 +326,3 @@ void HudPanel::save(rviz_common::Config config) const {
 
 #include <pluginlib/class_list_macros.hpp>
 PLUGINLIB_EXPORT_CLASS(sdc::HudPanel, rviz_common::Panel)
-
