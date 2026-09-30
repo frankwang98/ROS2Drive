@@ -332,7 +332,39 @@ class RingRoadSimNode : public rclcpp::Node {
     if (selected_planner == "ring_lane") {
       if (scenario_id != "ring_demo")
         throw std::invalid_argument("ring_lane planner requires scenario:=ring_demo");
-      simulation_.setPlanner(std::make_unique<planning::RingLanePlanner>());
+      planning::RingLanePlanner::Config ring_config;
+      ring_config.target_d = declare_parameter<double>("ring.target_d", -1.0);
+      ring_config.change_length = declare_parameter<double>("ring.change_length", 8.0);
+      ring_config.maximum_curvature =
+          std::tan(controller_config.maximum_steering) / controller_config.wheelbase;
+      auto ring_planner = std::make_unique<planning::RingLanePlanner>(ring_config);
+      ring_planner_ = ring_planner.get();
+      simulation_.setPlanner(std::move(ring_planner));
+      ring_parameter_callback_ = add_on_set_parameters_callback(
+          [lane_width = ring_config.lane_width](const std::vector<rclcpp::Parameter>& parameters) {
+            rcl_interfaces::msg::SetParametersResult result;
+            result.successful = true;
+            for (const auto& parameter : parameters) {
+              if (parameter.get_name() == "ring.target_d") {
+                if (parameter.get_type() != rclcpp::ParameterType::PARAMETER_DOUBLE) {
+                  result.successful = false;
+                  result.reason = "ring.target_d must be a double";
+                  break;
+                }
+                const double d = parameter.as_double();
+                if (!std::isfinite(d) || (d != -1.0 && (d < 0.0 || d > lane_width))) {
+                  result.successful = false;
+                  result.reason = "ring.target_d must be -1 (auto) or within [0, lane_width]";
+                  break;
+                }
+              } else if (parameter.get_name() == "ring.change_length") {
+                result.successful = false;
+                result.reason = "ring.change_length requires restarting the node";
+                break;
+              }
+            }
+            return result;
+          });
     } else if (selected_planner == "coverage") {
       if (scenario_id != "agriculture_route")
         throw std::invalid_argument("coverage planner requires scenario:=agriculture_route");
@@ -636,6 +668,8 @@ class RingRoadSimNode : public rclcpp::Node {
   // ========== 仿真主循环 ==========
   void simulation_step() {
     const auto loop_started = std::chrono::steady_clock::now();
+    if (ring_planner_)
+      ring_planner_->setTargetD(get_parameter("ring.target_d").as_double());
     if (driving_ && !paused_) {
       // 动态随机障碍物
       if (scenario_definition_.id == "ring_demo" && !fixed_ring_obstacles_) {
@@ -1208,6 +1242,9 @@ class RingRoadSimNode : public rclcpp::Node {
   scenario::ScenarioDefinition scenario_definition_;
   uint64_t scenario_mission_sequence_{0};
   simulation::SimulationEngine simulation_;
+  // Owned by simulation_; valid for the lifetime of this node's ring planner.
+  planning::RingLanePlanner* ring_planner_{nullptr};
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr ring_parameter_callback_;
   ObstacleManager obstacle_manager_;
 
   Mode mode_{Mode::kAuto};
@@ -1285,3 +1322,4 @@ int main(int argc, char** argv) {
   rclcpp::shutdown();
   return 0;
 }
+

@@ -19,6 +19,7 @@ from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -64,6 +65,10 @@ def generate_launch_description():
                                   description="Deprecated alias of behavior_profile"),
             DeclareLaunchArgument("planner_type", default_value="auto",
                                   description="Planner: auto/ring_lane/lattice/em/reference_path"),
+            DeclareLaunchArgument("ring_target_d", default_value="-1.0",
+                                  description="Ring Frenet target d: -1=auto, 0=left, 3=right"),
+            DeclareLaunchArgument("ring_change_length", default_value="8.0",
+                                  description="Ring lane-change length in reference-line metres"),
             DeclareLaunchArgument("controller_type", default_value="auto",
                                   description="Controller: mpc/lqr/stanley/pure_pursuit"),
 
@@ -84,6 +89,8 @@ def generate_launch_description():
                         "behavior_profile": LaunchConfiguration("behavior_profile"),
                         "bt_tree_id": LaunchConfiguration("bt_tree_id"),
                         "planner.type": LaunchConfiguration("planner_type"),
+                        "ring.target_d": ParameterValue(LaunchConfiguration("ring_target_d"), value_type=float),
+                        "ring.change_length": ParameterValue(LaunchConfiguration("ring_change_length"), value_type=float),
                         "controller.type": LaunchConfiguration("controller_type"),
                     },
                 ],

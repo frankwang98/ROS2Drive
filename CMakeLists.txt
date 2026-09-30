@@ -133,6 +133,9 @@ if(BUILD_TESTING)
   ament_add_gtest(sdc_runtime_tests test/runtime_core_test.cpp)
   target_link_libraries(sdc_runtime_tests sdc_runtime_core)
   target_include_directories(sdc_runtime_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_executable(sdc_ring_frenet_tests test/ring_frenet_test.cpp)
+  target_link_libraries(sdc_ring_frenet_tests sdc_runtime_core)
+  add_test(NAME sdc_ring_frenet_tests COMMAND sdc_ring_frenet_tests)
 endif()
 
 # ---- 旧版单机 demo（保留，方便对比）----
@@ -228,3 +231,4 @@ install(DIRECTORY launch rviz config docs
 )
 
 ament_package()
+
