@@ -4,7 +4,8 @@
 
 namespace sdc::planning {
 
-// A deterministic two-lane benchmark planner.  It is intentionally separate
+// A two-lane circular Frenet planner using quintic lateral d(s) curves.
+// It is intentionally separate
 // from the scenario-agnostic ReferencePathPlanner: lane semantics belong to
 // the ring teaching scenario, not to the general Runtime contract.
 class RingLanePlanner final : public Planner {
@@ -20,11 +21,17 @@ class RingLanePlanner final : public Planner {
     // + margin(0.3) remains below the lane-centre separation.
     double obstacle_margin{0.3};
     double vehicle_radius{0.6};
+    // -1 selects the obstacle-driven lane policy; [0, lane_width] requests
+    // an outward-positive Frenet d. Both modes retain collision checking.
+    double target_d{-1.0};
+    double maximum_curvature{0.30};
   };
 
   RingLanePlanner();
   explicit RingLanePlanner(Config config);
   PlanningResult plan(const PlanningInput& input) override;
+  // Invalid requests leave the current target unchanged.
+  bool setTargetD(double target_d);
 
  private:
   enum class Maneuver { kKeepLeft, kChangeRight, kKeepRight, kChangeLeft };
