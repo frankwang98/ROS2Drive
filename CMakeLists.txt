@@ -136,6 +136,9 @@ if(BUILD_TESTING)
   add_executable(sdc_ring_frenet_tests test/ring_frenet_test.cpp)
   target_link_libraries(sdc_ring_frenet_tests sdc_runtime_core)
   add_test(NAME sdc_ring_frenet_tests COMMAND sdc_ring_frenet_tests)
+  add_executable(sdc_manual_drive_tests test/manual_drive_test.cpp)
+  target_link_libraries(sdc_manual_drive_tests sdc_runtime_core)
+  add_test(NAME sdc_manual_drive_tests COMMAND sdc_manual_drive_tests)
 endif()
 
 # ---- 旧版单机 demo（保留，方便对比）----
@@ -211,6 +214,18 @@ if(SDC_BUILD_RVIZ_PANEL)
   pluginlib_export_plugin_description_file(rviz_common
     src/adapters/visualization/rviz/plugin_description.xml
   )
+  if(BUILD_TESTING)
+    find_package(Qt5 REQUIRED COMPONENTS Test)
+    add_executable(sdc_hud_panel_smoke test/hud_panel_smoke.cpp)
+    target_link_libraries(sdc_hud_panel_smoke sdc_hud_panel sdc_runtime_core Qt5::Widgets Qt5::Test)
+    target_include_directories(sdc_hud_panel_smoke PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/adapters/visualization/rviz)
+    ament_target_dependencies(sdc_hud_panel_smoke rclcpp std_msgs geometry_msgs nav_msgs rviz_common)
+    add_test(NAME sdc_hud_panel_smoke COMMAND sdc_hud_panel_smoke)
+    set_tests_properties(sdc_hud_panel_smoke PROPERTIES
+      ENVIRONMENT "QT_QPA_PLATFORM=offscreen;HUD_PREVIEW_DIR=${CMAKE_CURRENT_BINARY_DIR}/hud-preview")
+  endif()
+
 endif()
 
 # ---- 安装 ----
@@ -231,4 +246,3 @@ install(DIRECTORY launch rviz config docs
 )
 
 ament_package()
-

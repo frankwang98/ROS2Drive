@@ -26,7 +26,7 @@ bool SimulatedVehicle::healthy() const {
 }
 void SimulatedVehicle::applyManual(double throttle, double steering, double dt_s) {
   const double target = std::clamp(throttle, -1.0, 1.0) * 4.0;
-  const double speed = velocity_controller_.update(target, model_.speed(), dt_s);
+  const double speed = velocity_controller_.update(target, model_.speed(), dt_s, true);
   model_.update(speed, std::clamp(steering, -1.0, 1.0) * 0.55, dt_s);
 }
 void SimulatedVehicle::reset(double x, double y, double yaw) {

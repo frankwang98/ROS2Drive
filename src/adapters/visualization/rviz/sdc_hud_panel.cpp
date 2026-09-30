@@ -9,6 +9,9 @@
 
 #include "sdc_hud_panel.hpp"
 
+#include <cmath>
+#include <QMetaObject>
+
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
@@ -20,79 +23,36 @@ namespace sdc {
 
 static const char* kActionNames[] = {"ACCEL", "CRUISE", "BRAKE", "STOP"};
 
-HudPanel::HudPanel(QWidget* parent)
-    : rviz_common::Panel(parent),
-      speed_label_(nullptr),
-      action_label_(nullptr),
-      distance_label_(nullptr),
-      mode_label_(nullptr),
-      start_button_(nullptr),
-      pause_button_(nullptr),
-      clear_button_(nullptr),
-      mode_button_(nullptr),
-      reset_button_(nullptr),
-      ui_timer_(nullptr) {
-  auto* root = new QVBoxLayout(this);
-  root->setContentsMargins(6, 6, 6, 6);
-  root->setSpacing(6);
-  setStyleSheet(
-      "QWidget { background: #20252b; color: #dce7ef; font-size: 11px; }"
-      "QFrame#statusCard { background: #171c22; border: 1px solid #35424e; border-radius: 5px; }"
-      "QPushButton { background: #293744; border: 1px solid #455d70;"
-      " border-radius: 4px; padding: 4px 7px; min-height: 22px; }"
-      "QPushButton:hover { background: #365167; }"
-      "QPushButton#primary { background: #1f5f82; border-color: #4aa8d8; }"
-      "QLabel { color: #b9c8d3; }"
-      "QLabel#statusValue { color: #f3c969; font-weight: 600; }");
+HudPanel::HudPanel(QWidget* parent) : rviz_common::Panel(parent) {
+  dashboard_ = hud::buildDashboard(this);
+  speed_label_ = dashboard_.speed;
+  action_label_ = dashboard_.action;
+  distance_label_ = dashboard_.distance;
+  mode_label_ = dashboard_.mode;
+  start_button_ = dashboard_.start;
+  pause_button_ = dashboard_.pause;
+  clear_button_ = dashboard_.clear;
+  mode_button_ = dashboard_.manual;
+  reset_button_ = dashboard_.reset;
 
-  auto* status_card = new QFrame(this);
-  status_card->setObjectName("statusCard");
-  auto* state_layout = new QGridLayout(status_card);
-  state_layout->setContentsMargins(8, 7, 8, 7);
-  state_layout->setHorizontalSpacing(16);
-  state_layout->setVerticalSpacing(3);
-  speed_label_ = new QLabel("SPEED  -- m/s", status_card);
-  action_label_ = new QLabel("ACTION --", status_card);
-  distance_label_ = new QLabel("FRONT  -- m", status_card);
-  mode_label_ = new QLabel("MODE   AUTO", status_card);
-  speed_label_->setObjectName("statusValue");
-  action_label_->setObjectName("statusValue");
-  distance_label_->setObjectName("statusValue");
-  mode_label_->setObjectName("statusValue");
-  state_layout->addWidget(speed_label_, 0, 0);
-  state_layout->addWidget(action_label_, 0, 1);
-  state_layout->addWidget(distance_label_, 1, 0);
-  state_layout->addWidget(mode_label_, 1, 1);
-  root->addWidget(status_card);
-
-  mode_button_ = new QPushButton("MANUAL / WASD", this);
-  root->addWidget(mode_button_);
-
-  auto* ctrl_row = new QHBoxLayout();
-  ctrl_row->setContentsMargins(0, 0, 0, 0);
-  ctrl_row->setSpacing(5);
-  start_button_ = new QPushButton("START", this);
-  start_button_->setObjectName("primary");
-  pause_button_ = new QPushButton("PAUSE", this);
-  clear_button_ = new QPushButton("CLEAR", this);
-  ctrl_row->addWidget(start_button_);
-  ctrl_row->addWidget(pause_button_);
-  ctrl_row->addWidget(clear_button_);
-  reset_button_ = new QPushButton("RESET", this);
-  ctrl_row->addWidget(reset_button_);
-  root->addLayout(ctrl_row);
-  root->addStretch(1);
-
-  // 信号连接
   connect(start_button_, &QPushButton::clicked, this, &HudPanel::onStart);
   connect(pause_button_, &QPushButton::clicked, this, &HudPanel::onTogglePause);
   connect(clear_button_, &QPushButton::clicked, this, &HudPanel::onClearTrail);
-  connect(mode_button_, &QPushButton::clicked, this, &HudPanel::onToggleMode);
+  connect(mode_button_, &QPushButton::clicked, this, [this] {
+    if (!manual_) onToggleMode();
+    else onStatusTimer();
+    setFocus(Qt::OtherFocusReason);
+  });
+  connect(dashboard_.automatic, &QPushButton::clicked, this, [this] {
+    if (manual_) onToggleMode();
+    else onStatusTimer();
+    setFocus(Qt::OtherFocusReason);
+  });
   connect(reset_button_, &QPushButton::clicked, this, &HudPanel::onResetCar);
-
-  // 允许面板接收键盘焦点（WASD 控制需要）
+  for (auto* button : {start_button_, pause_button_, clear_button_, mode_button_,
+                       dashboard_.automatic, reset_button_})
+    button->setEnabled(false);
   setFocusPolicy(Qt::StrongFocus);
-  setFocus();
 }
 
 void HudPanel::onInitialize() {
@@ -101,7 +61,12 @@ void HudPanel::onInitialize() {
   auto ros_node_abs = getDisplayContext()->getRosNodeAbstraction().lock();
   if (!ros_node_abs)
     return;
-  node_ = ros_node_abs->get_raw_node();
+  initializeRos(ros_node_abs->get_raw_node());
+}
+
+void HudPanel::initializeRos(rclcpp::Node::SharedPtr node) {
+  if (!node || node_) return;
+  node_ = std::move(node);
 
   auto qos = rclcpp::QoS(10);
   speed_sub_ = node_->create_subscription<std_msgs::msg::Float64>(
@@ -125,6 +90,9 @@ void HudPanel::onInitialize() {
   reset_pub_ = node_->create_publisher<std_msgs::msg::Bool>("sdc/reset_car", qos);
   manual_pub_ = node_->create_publisher<geometry_msgs::msg::Twist>("sdc/manual_cmd", qos);
 
+  for (auto* button : {start_button_, pause_button_, clear_button_, mode_button_,
+                       dashboard_.automatic, reset_button_})
+    button->setEnabled(true);
   ui_timer_ = new QTimer(this);
   ui_timer_->setInterval(50);  // 20Hz 手动指令发送
   connect(ui_timer_, &QTimer::timeout, this, &HudPanel::onStatusTimer);
@@ -132,6 +100,8 @@ void HudPanel::onInitialize() {
 }
 
 HudPanel::~HudPanel() {
+  key_w_ = key_s_ = key_a_ = key_d_ = false;
+  if (manual_) publishManualCmd();
   if (ui_timer_) {
     ui_timer_->stop();
     delete ui_timer_;
@@ -139,65 +109,106 @@ HudPanel::~HudPanel() {
   }
 }
 
+// ROS subscriptions may run outside the Qt GUI thread. Queue state updates
+// through the panel's QObject context; queued work is cancelled on destruction.
 void HudPanel::onSpeed(const std_msgs::msg::Float64::SharedPtr msg) {
-  speed_ = msg->data;
+  QMetaObject::invokeMethod(this, [this, value = msg->data] {
+    speed_ = value;
+    have_speed_ = std::isfinite(value);
+    telemetry_clock_.restart();
+  }, Qt::QueuedConnection);
 }
 void HudPanel::onAction(const std_msgs::msg::Float64::SharedPtr msg) {
-  action_id_ = static_cast<int>(msg->data);
+  QMetaObject::invokeMethod(this, [this, value = msg->data] {
+    action_id_ = std::isfinite(value) && value >= 0.0 && value <= 3.0
+                     ? static_cast<int>(value) : -1;
+  }, Qt::QueuedConnection);
 }
 void HudPanel::onDistance(const std_msgs::msg::Float64::SharedPtr msg) {
-  distance_ = msg->data;
+  QMetaObject::invokeMethod(this, [this, value = msg->data] {
+    distance_ = value;
+    have_distance_ = std::isfinite(value);
+  }, Qt::QueuedConnection);
 }
 void HudPanel::onOdometry(const nav_msgs::msg::Odometry::SharedPtr msg) {
-  pose_x_ = msg->pose.pose.position.x;
-  pose_y_ = msg->pose.pose.position.y;
-  pose_z_ = msg->pose.pose.position.z;
+  const auto position = msg->pose.pose.position;
+  QMetaObject::invokeMethod(this, [this, position] {
+    pose_x_ = position.x;
+    pose_y_ = position.y;
+    pose_z_ = position.z;
+    have_position_ = std::isfinite(pose_x_) && std::isfinite(pose_y_) && std::isfinite(pose_z_);
+  }, Qt::QueuedConnection);
 }
 void HudPanel::onMode(const std_msgs::msg::Int32::SharedPtr msg) {
-  manual_ = (msg->data == 1);
-  mode_label_->setText(manual_ ? "MODE   MANUAL" : "MODE   AUTO");
-  mode_button_->setText(manual_ ? "AUTO MODE" : "MANUAL / WASD");
-  if (!manual_) {
-    // 切回自动时松开全部键
-    key_w_ = key_s_ = key_a_ = key_d_ = false;
-    publishManualCmd();
-  }
+  QMetaObject::invokeMethod(this, [this, value = msg->data] {
+    manual_ = value == 1;
+    if (!manual_) {
+      key_w_ = key_s_ = key_a_ = key_d_ = false;
+      publishManualCmd();
+    }
+    onStatusTimer();
+  }, Qt::QueuedConnection);
 }
-
 void HudPanel::onMissionStage(const std_msgs::msg::String::SharedPtr msg) {
-  mission_stage_ = msg->data.empty() ? "UNKNOWN" : msg->data;
+  QMetaObject::invokeMethod(this, [this, value = msg->data] {
+    mission_stage_ = value.empty() ? "--" : value;
+  }, Qt::QueuedConnection);
 }
 
 void HudPanel::onStatusTimer() {
-  if (speed_label_)
-    speed_label_->setText(QString("SPEED  %1 m/s").arg(speed_, 0, 'f', 1));
-  if (action_label_) {
-    const char* name = "UNKNOWN";
-    if (action_id_ >= 0 && action_id_ <= 3)
-      name = kActionNames[action_id_];
-    action_label_->setText(QString("ACTION %1").arg(name));
-  }
-  if (distance_label_)
-    distance_label_->setText(QString("FRONT  %1 m").arg(distance_, 0, 'f', 1));
-  if (pause_button_)
-    pause_button_->setText(paused_ ? "RESUME" : "PAUSE");
-
-  // 手动模式下持续发送指令（保证松开后自动回中）
-  if (manual_)
-    publishManualCmd();
+  speed_label_->setText(have_speed_ ? QString::number(speed_, 'f', 1) : "--");
+  const char* action = "--";
+  if (action_id_ >= 0 && action_id_ <= 3) action = kActionNames[action_id_];
+  action_label_->setText(action);
+  hud::setTone(action_label_, action_id_ >= 2 ? "warning" : "good");
+  distance_label_->setText(have_distance_ ? QString::number(distance_, 'f', 1) : "--");
+  hud::setTone(distance_label_, have_distance_ && distance_ < 3.0 ? "warning" : "normal");
+  mode_label_->setText(manual_ ? "MANUAL" : "AUTO");
+  dashboard_.automatic->setChecked(!manual_);
+  mode_button_->setChecked(manual_);
+  dashboard_.keyboard->setVisible(manual_);
+  dashboard_.mission->setText(QString::fromStdString(mission_stage_));
+  dashboard_.position->setText(have_position_
+      ? QString("X %1   Y %2   Z %3").arg(pose_x_, 0, 'f', 1).arg(pose_y_, 0, 'f', 1).arg(pose_z_, 0, 'f', 1)
+      : "X --   Y --   Z --");
+  const bool live = telemetry_clock_.isValid() && telemetry_clock_.elapsed() < 2000;
+  dashboard_.connection->setText(live ? (paused_ ? "LIVE TELEMETRY  /  PAUSED" : "LIVE TELEMETRY")
+      : telemetry_clock_.isValid() ? "TELEMETRY STALE" : "WAITING FOR TELEMETRY");
+  hud::setTone(dashboard_.connection, live ? "good" : "muted");
+  pause_button_->setText(paused_ ? "Resume" : "Pause");
+  hud::setTone(dashboard_.key_w, key_w_ ? "pressed" : "normal");
+  hud::setTone(dashboard_.key_a, key_a_ ? "pressed" : "normal");
+  hud::setTone(dashboard_.key_s, key_s_ ? "pressed" : "normal");
+  hud::setTone(dashboard_.key_d, key_d_ ? "pressed" : "normal");
+  if (manual_) publishManualCmd();
 }
 
 // ---- 键盘事件（WASD）----
 void HudPanel::keyPressEvent(QKeyEvent* event) {
-  if (manual_)
-    updateKey(event->key(), true);
+  const int key = event->key();
+  if (manual_ && (key == Qt::Key_W || key == Qt::Key_A || key == Qt::Key_S || key == Qt::Key_D)) {
+    if (!event->isAutoRepeat()) updateKey(key, true);
+    event->accept();
+    return;
+  }
   QWidget::keyPressEvent(event);
 }
 
 void HudPanel::keyReleaseEvent(QKeyEvent* event) {
-  if (manual_)
-    updateKey(event->key(), false);
+  const int key = event->key();
+  if (manual_ && (key == Qt::Key_W || key == Qt::Key_A || key == Qt::Key_S || key == Qt::Key_D)) {
+    if (!event->isAutoRepeat()) updateKey(key, false);
+    event->accept();
+    return;
+  }
   QWidget::keyReleaseEvent(event);
+}
+
+void HudPanel::focusOutEvent(QFocusEvent* event) {
+  // Losing panel focus must never leave a held throttle/steering command.
+  key_w_ = key_s_ = key_a_ = key_d_ = false;
+  if (manual_) publishManualCmd();
+  QWidget::focusOutEvent(event);
 }
 
 void HudPanel::updateKey(int key, bool pressed) {
@@ -258,6 +269,7 @@ void HudPanel::publishManualCmd() {
 
 // ---- 控制按钮 ----
 void HudPanel::onStart() {
+  if (!start_pub_) return;
   auto msg = std_msgs::msg::Bool();
   msg.data = true;
   start_pub_->publish(msg);
@@ -266,6 +278,7 @@ void HudPanel::onStart() {
 }
 
 void HudPanel::onTogglePause() {
+  if (!pause_pub_) return;
   paused_ = !paused_;
   auto msg = std_msgs::msg::Bool();
   msg.data = paused_;
@@ -274,12 +287,14 @@ void HudPanel::onTogglePause() {
 }
 
 void HudPanel::onClearTrail() {
+  if (!clear_pub_) return;
   auto msg = std_msgs::msg::Bool();
   msg.data = true;
   clear_pub_->publish(msg);
 }
 
 void HudPanel::onToggleMode() {
+  if (!set_mode_pub_) return;
   manual_ = !manual_;
   auto msg = std_msgs::msg::Int32();
   msg.data = manual_ ? 1 : 0;
@@ -292,6 +307,9 @@ void HudPanel::onToggleMode() {
 }
 
 void HudPanel::onResetCar() {
+  if (!reset_pub_) return;
+  key_w_ = key_s_ = key_a_ = key_d_ = false;
+  if (manual_) publishManualCmd();
   auto msg = std_msgs::msg::Bool();
   msg.data = true;
   reset_pub_->publish(msg);
