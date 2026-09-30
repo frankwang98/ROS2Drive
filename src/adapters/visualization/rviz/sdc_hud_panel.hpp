@@ -18,6 +18,9 @@
 #include <string>
 
 #include <QWidget>
+#include <QElapsedTimer>
+#include <QFocusEvent>
+#include "hud_dashboard.hpp"
 #include <QLabel>
 #include <QPushButton>
 #include <QComboBox>
@@ -48,8 +51,11 @@ class HudPanel : public rviz_common::Panel {
   void save(rviz_common::Config config) const override;
 
  protected:
+  // Also usable by the offscreen ROS/Qt integration check without an RViz context.
+  void initializeRos(rclcpp::Node::SharedPtr node);
   void keyPressEvent(QKeyEvent* event) override;
   void keyReleaseEvent(QKeyEvent* event) override;
+  void focusOutEvent(QFocusEvent* event) override;
 
  private Q_SLOTS:
   void onStart();
@@ -72,6 +78,12 @@ class HudPanel : public rviz_common::Panel {
   /// 更新手动控制键位状态（按下/松开）。
   void updateKey(int key, bool pressed);
 
+  hud::Dashboard dashboard_{};
+  QElapsedTimer telemetry_clock_;
+  bool have_speed_{false};
+  bool have_distance_{false};
+  bool have_position_{false};
+
   // ---- 状态显示 ----
   QLabel* speed_label_;
   QLabel* action_label_;
@@ -86,7 +98,7 @@ class HudPanel : public rviz_common::Panel {
   QPushButton* reset_button_;
 
   // ---- UI 定时器 ----
-  QTimer* ui_timer_;
+  QTimer* ui_timer_{nullptr};
 
   // ---- ROS ----
   rclcpp::Node::SharedPtr node_;
@@ -112,8 +124,8 @@ class HudPanel : public rviz_common::Panel {
   double pose_x_{0.0};
   double pose_y_{0.0};
   double pose_z_{0.0};
-  int action_id_{0};
-  std::string mission_stage_{"TRANSIT"};
+  int action_id_{-1};
+  std::string mission_stage_{"--"};
 
   // WASD 键位状态
   bool key_w_{false};  // 前进
@@ -125,3 +137,4 @@ class HudPanel : public rviz_common::Panel {
 }  // namespace sdc
 
 #endif  // SELF_DRIVING_CAR_RVIZ_SDC_HUD_PANEL_HPP
+
