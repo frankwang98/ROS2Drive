@@ -38,6 +38,35 @@ migration is completed.
 only: the vehicle dynamics remain planar, so it does not yet model pitch, grade resistance,
 or load-dependent uphill acceleration.
 
+
+## Ring reference coordinates
+
+With `scenario:=ring_demo planner_type:=auto`, the ROS node selects
+`RingLanePlanner`. Its circular reference is the mission's left lane centre,
+centred at the map origin and travelled counter-clockwise. The reference radius
+is the mean radius of the mission route.
+
+- Reference-line progress is periodic: `s = R * angle`, modulo `2*pi*R`.
+  Obstacle forward and signed distances are measured along this reference.
+- Lateral offset is `d = hypot(x, y) - R`: positive points outward, toward
+  the demo's right lane. This preserves the existing demo convention and is
+  opposite to the common left-positive Frenet convention.
+- Cartesian conversion is `x = (R+d)*cos(angle)`,
+  `y = (R+d)*sin(angle)`.
+- The local trajectory sampling distance retains the original formula
+  `angle = vehicle_angle + local_distance / max(1, R+d)`.
+  It is a sampling parameter along the offset circle, not reference-line
+  Frenet s during a lane change. Pose yaw retains the circular tangent
+  approximation. Neither formula is changed by the coordinate refactor.
+
+The internal `CircularReferenceLine` helper centralizes projection, distance
+wrapping and Cartesian conversion. Lane-change policy, collision checks,
+sampling, speed and controller settings retain their existing behavior.
+This model is specific to the origin-centred circular demo; arbitrary curves,
+reverse travel and non-ring scenarios require their own reference geometry.
+The legacy `lattice` and `em` implementations also contain ring geometry;
+they are not generic Frenet planners for mining or port routes.
+
 ## Failure scenarios
 
 1. Localization loss: set `FaultInjection.localization_available=false`; expect `FAULT`, zero speed and full brake.
