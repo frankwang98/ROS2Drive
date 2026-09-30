@@ -16,6 +16,37 @@ double wrap_positive(double angle) {
   return angle;
 }
 
+// Circular reference line centred at the map origin, travelled counter-clockwise.
+// s = radius * angle (periodic); d is positive OUTWARD to preserve the demo's
+// right-lane convention. This is opposite to the common left-positive Frenet d.
+struct RingProjection {
+  double angle;
+  double d;
+};
+
+struct CircularReferenceLine {
+  double radius;
+
+  RingProjection project(const domain::Pose2D& pose) const {
+    return {std::atan2(pose.y, pose.x), std::hypot(pose.x, pose.y) - radius};
+  }
+
+  double forwardDistance(double from_angle, double to_angle) const {
+    return wrap_positive(to_angle - from_angle) * radius;
+  }
+
+  double signedAngle(double from_angle, double to_angle) const {
+    const double delta = to_angle - from_angle;
+    return std::atan2(std::sin(delta), std::cos(delta));
+  }
+
+  domain::Pose2D sample(double angle, double d) const {
+    const double offset_radius = radius + d;
+    return {offset_radius * std::cos(angle), offset_radius * std::sin(angle),
+            angle + kPi / 2.0};
+  }
+};
+
 double smoothstep(double t) {
   t = std::clamp(t, 0.0, 1.0);
   return t * t * (3.0 - 2.0 * t);
@@ -41,17 +72,18 @@ PlanningResult RingLanePlanner::plan(const PlanningInput& input) {
   const double vehicle_radius = std::hypot(input.vehicle.pose.x, input.vehicle.pose.y);
   const double vehicle_angle = std::atan2(input.vehicle.pose.y, input.vehicle.pose.x);
 
+  const CircularReferenceLine reference{left_radius};
+
   bool left_blocked_ahead = false;
   bool left_obstacle_cleared_behind = false;
   bool right_blocked_ahead = false;
   for (const auto& obstacle : input.obstacles) {
-    const double obstacle_radius = std::hypot(obstacle.pose.x, obstacle.pose.y);
-    const double lateral = obstacle_radius - left_radius;
-    const double angular_delta =
-        std::atan2(std::sin(std::atan2(obstacle.pose.y, obstacle.pose.x) - vehicle_angle),
-                   std::cos(std::atan2(obstacle.pose.y, obstacle.pose.x) - vehicle_angle));
-    const double forward_s = wrap_positive(angular_delta) * left_radius;
+    const auto projection = reference.project(obstacle.pose);
+    const double lateral = projection.d;
+    const double angular_delta = reference.signedAngle(vehicle_angle, projection.angle);
     const double signed_s = angular_delta * left_radius;
+    // Retain the principal-angle wrapping used by the original obstacle policy.
+    const double forward_s = wrap_positive(angular_delta) * left_radius;
     const bool ahead = forward_s > 0.5 && forward_s < config_.horizon;
     const bool same_left_lane = std::abs(lateral) < config_.lane_width * 0.45;
     const bool same_right_lane = std::abs(lateral - config_.lane_width) < config_.lane_width * 0.45;
@@ -96,9 +128,7 @@ PlanningResult RingLanePlanner::plan(const PlanningInput& input) {
     const double radius = left_radius + lateral;
     const double angle = vehicle_angle + s / std::max(1.0, radius);
     domain::Waypoint point;
-    point.pose.x = radius * std::cos(angle);
-    point.pose.y = radius * std::sin(angle);
-    point.pose.yaw = angle + kPi / 2.0;
+    point.pose = reference.sample(angle, lateral);
     point.velocity = input.speed_limit;
     point.relative_time = s / std::max(0.1, input.speed_limit);
     result.trajectory.points.push_back(point);
@@ -108,14 +138,14 @@ PlanningResult RingLanePlanner::plan(const PlanningInput& input) {
   // Do not "best effort" through it: VehicleRuntime converts this planning
   // failure into a SafetyManager stop command.
   for (const auto& obstacle : input.obstacles) {
-    const double obstacle_angle = std::atan2(obstacle.pose.y, obstacle.pose.x);
-    const double forward_s = wrap_positive(obstacle_angle - vehicle_angle) * left_radius;
+    const auto projection = reference.project(obstacle.pose);
+    const double forward_s = reference.forwardDistance(vehicle_angle, projection.angle);
     // Obstacles behind the rear axle do not collide with a forward-only local
     // trajectory.  Without this filter, an already-passed left-lane blocker
     // falsely vetoes the right-to-left return manoeuvre.
     if (forward_s > config_.horizon + config_.spacing)
       continue;
-    const double obstacle_lateral = std::hypot(obstacle.pose.x, obstacle.pose.y) - left_radius;
+    const double obstacle_lateral = projection.d;
     // Once there is enough distance to complete the manoeuvre, a blocker in
     // the left lane must not veto a trajectory whose committed target is the
     // right lane.  The old point-wise Euclidean check treated that adjacent
