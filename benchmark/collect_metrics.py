@@ -18,13 +18,13 @@ from self_driving_car_demo.msg import RuntimeMetrics
 
 
 class Collector(Node):
-    def __init__(self, namespace):
+    def __init__(self, namespace, odometry_topic=None):
         super().__init__("sdc_benchmark_collector")
         prefix = "/" + namespace.strip("/") if namespace.strip("/") else ""
         self.metrics = []
         self.odometry = []
         self.create_subscription(RuntimeMetrics, prefix + "/runtime/metrics", self.on_metrics, 10)
-        self.create_subscription(Odometry, prefix + "/sdc/odometry", self.on_odom, 10)
+        self.create_subscription(Odometry, odometry_topic or (prefix + "/sdc/odometry"), self.on_odom, 10)
 
     def on_metrics(self, msg):
         self.metrics.append({
@@ -76,11 +76,12 @@ def main():
     parser.add_argument("--duration", type=float, default=60.0, help="Capture seconds (wall clock)")
     parser.add_argument("--namespace", default="", help="ROS namespace, e.g. car01")
     parser.add_argument("--output", default="benchmark-result.json")
+    parser.add_argument("--odometry-topic", default=None, help="Override odometry source, e.g. /gazebo/odometry")
     args = parser.parse_args()
     if not math.isfinite(args.duration) or args.duration <= 0:
         parser.error("--duration must be finite and positive")
     rclpy.init()
-    node = Collector(args.namespace)
+    node = Collector(args.namespace, args.odometry_topic)
     started = time.monotonic()
     try:
         while rclpy.ok() and time.monotonic() - started < args.duration:

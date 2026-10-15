@@ -64,3 +64,21 @@ ros2 launch self_driving_car_demo gazebo.launch.py run_native:=true bridge_comma
 The ROS command path is `control/command` → Python adapter → `/model/ackermann_car/cmd_vel` → `ros_gz_bridge` → Gazebo AckermannSteering plugin. The adapter maps steering angle and speed to Twist yaw rate with `omega = v*tan(delta)/2.0`, caps inputs, and commands zero on e-stop, braking, invalid values, or stale commands (>0.3 s).
 
 **This is not closed-loop Gazebo simulation.** The native runtime still uses its own physics and odometry. Gazebo wheel contacts, plugin compatibility, and vehicle movement have not been tested in a real ROS/Gazebo environment. Do not interpret this as validated tracking or benchmark data. Next: bridge Gazebo odometry, make the Gazebo state authoritative, and test TF and stop behavior.
+
+## Gazebo odometry observation (experimental)
+
+The Gazebo SDF now includes an OdometryPublisher plugin. The launch bridges its Gazebo Transport topic to ROS 2 `/gazebo/odometry`. Check messages before attempting any closed-loop integration:
+
+```bash
+ros2 launch self_driving_car_demo gazebo.launch.py
+ros2 topic echo /gazebo/odometry --once
+gz topic -l | grep odometry
+```
+
+The Gazebo model may need motion commands before publishing useful changing poses. Record independent Gazebo movement with:
+
+```bash
+python3 benchmark/collect_metrics.py --duration 60 --odometry-topic /gazebo/odometry --output benchmark/results/gazebo.json
+```
+
+The benchmark still requires `/runtime/metrics` from the native runtime. This captures Gazebo displacement but **does not close the feedback loop** or establish ground-truth tracking error. Gazebo odometry must be connected to a dedicated external-state runtime adapter, with internal dynamics disabled, before closed-loop claims are valid. This bridge has not been runtime-tested.

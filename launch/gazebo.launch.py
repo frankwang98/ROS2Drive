@@ -31,6 +31,12 @@ def generate_launch_description():
             condition=IfCondition(LaunchConfiguration("bridge_commands")),
             output="screen",
         ),
+        Node(
+            package="ros_gz_bridge", executable="parameter_bridge",
+            arguments=["/model/ackermann_car/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry"],
+            remappings=[("/model/ackermann_car/odometry", "/gazebo/odometry")],
+            output="screen",
+        ),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(str(pkg / "launch" / "ring_road.launch.py")),
             condition=IfCondition(LaunchConfiguration("run_native")),
