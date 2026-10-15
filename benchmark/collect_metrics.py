@@ -24,7 +24,7 @@ class Collector(Node):
         self.metrics = []
         self.odometry = []
         self.create_subscription(RuntimeMetrics, prefix + "/runtime/metrics", self.on_metrics, 10)
-        self.create_subscription(Odometry, prefix + "/odom", self.on_odom, 10)
+        self.create_subscription(Odometry, prefix + "/sdc/odometry", self.on_odom, 10)
 
     def on_metrics(self, msg):
         self.metrics.append({
