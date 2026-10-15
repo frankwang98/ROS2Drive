@@ -8,6 +8,7 @@ class BenchmarkSummaryTest(unittest.TestCase):
         report = summarize([], [], 1.0, "")
         self.assertIsNone(report["loop_ms_p95"])
         self.assertEqual(report["distance_traveled_m"], 0)
+        self.assertIsNone(report["fault_sample_ratio"])
 
     def test_statistics(self):
         samples = [
@@ -19,6 +20,8 @@ class BenchmarkSummaryTest(unittest.TestCase):
         self.assertEqual(report["loop_ms_p95"], 4.0)
         self.assertEqual(report["distance_traveled_m"], 5.0)
         self.assertEqual(report["samples_with_faults"], 1)
+        self.assertAlmostEqual(report["fault_sample_ratio"], 1 / 3)
+        self.assertEqual(report["stationary_odometry_steps"], 0)
 
 
 if __name__ == "__main__":
