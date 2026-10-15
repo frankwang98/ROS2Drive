@@ -47,6 +47,8 @@ def summarize(samples, odom, duration, namespace):
         for a, b in zip(odom, odom[1:])
     ]
     p95 = times[math.ceil(0.95 * len(times)) - 1] if times else None
+    total_distance = sum(distances)
+    stationary = sum(d < 0.001 for d in distances)
     return {
         "schema_version": 1,
         "namespace": namespace,
@@ -57,7 +59,9 @@ def summarize(samples, odom, duration, namespace):
         "loop_ms_p95": p95,
         "loop_ms_max": max(times) if times else None,
         "samples_with_faults": sum(x["active_faults"] > 0 for x in samples),
-        "distance_traveled_m": sum(distances),
+        "distance_traveled_m": total_distance,
+        "stationary_odometry_steps": stationary,
+        "fault_sample_ratio": (sum(x["active_faults"] > 0 for x in samples) / len(samples)) if samples else None,
         "trajectory_points_mean": statistics.mean(x["trajectory_points"] for x in samples) if samples else None,
         "limitations": [
             "No path tracking error or collision success metric is inferred from these topics.",
