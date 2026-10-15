@@ -35,6 +35,11 @@ runtime::RuntimeOutput SimulationEngine::step(double dt_s) {
   return output;
 }
 
+void SimulationEngine::syncExternalVisualization(const domain::VehicleState& measured) {
+  // Keep legacy RViz/HUD readers in sync without changing simulation clock.
+  vehicle_.reset(measured.pose.x, measured.pose.y, measured.pose.yaw);
+}
+
 runtime::RuntimeOutput SimulationEngine::stepExternal(
     const domain::VehicleState& measured, double dt_s) {
   simulation_time_s_ += dt_s;

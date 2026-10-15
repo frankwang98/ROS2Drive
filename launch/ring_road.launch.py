@@ -69,6 +69,7 @@ def generate_launch_description():
                                   description="Ring Frenet target d: -1=auto, 0=left, 3=right"),
             DeclareLaunchArgument("ring_change_length", default_value="8.0",
                                   description="Ring lane-change length in reference-line metres"),
+            DeclareLaunchArgument("physics_backend", default_value="native"),
             DeclareLaunchArgument("controller_type", default_value="auto",
                                   description="Controller: mpc/lqr/stanley/pure_pursuit"),
 
@@ -83,6 +84,7 @@ def generate_launch_description():
                     LaunchConfiguration("params_file"),
                     {
                         "initial_mode": LaunchConfiguration("mode"),
+                        "physics_backend": LaunchConfiguration("physics_backend"),
                         "robot_id": LaunchConfiguration("robot_id"),
                         "bt_xml": LaunchConfiguration("bt_xml"),
                         "scenario": LaunchConfiguration("scenario"),

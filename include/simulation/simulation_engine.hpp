@@ -24,6 +24,7 @@ class SimulationEngine {
   runtime::RuntimeOutput step(double dt_s);
   // External physics backend: plan/control using measured state without integrating native dynamics.
   runtime::RuntimeOutput stepExternal(const domain::VehicleState& measured, double dt_s);
+  void syncExternalVisualization(const domain::VehicleState& measured);
   void manualStep(double throttle, double steering, double dt_s);
   void reset(double x, double y, double yaw);
   bool pause();

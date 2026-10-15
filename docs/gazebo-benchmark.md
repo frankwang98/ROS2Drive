@@ -88,3 +88,15 @@ The benchmark still requires `/runtime/metrics` from the native runtime. This ca
 `SimulationEngine::stepExternal(measured, dt_s)` now accepts a measured `domain::VehicleState` and executes planning/control without applying the resulting command to the native `SimulatedVehicle`. This keeps physics authority with the external simulator. The existing `step(dt_s)` behavior is unchanged.
 
 A core unit test checks that external stepping does not integrate the native vehicle. **The ROS node does not yet select this path**: it still calls `step()`, so this is an API preparation, not a completed Gazebo feedback loop. Next, implement a runtime backend selector, Gazebo odometry subscription, state freshness checks, and ensure all visualization and safety logic use the same measured state.
+
+## Experimental external-state feedback path
+
+With `run_native:=true`, the launch now passes `physics_backend:=gazebo` to the ROS runtime. The node subscribes to `/gazebo/odometry`, checks pose finiteness and freshness (default 0.5 s), and calls `SimulationEngine::stepExternal` instead of advancing the internal dynamics. A separate visualization-only sync keeps legacy RViz markers aligned to the external pose. On stale odometry, the node publishes an emergency-stop command instead of running a planning tick.
+
+```bash
+ros2 launch self_driving_car_demo gazebo.launch.py run_native:=true bridge_commands:=true
+ros2 topic hz /gazebo/odometry
+ros2 topic echo /control/command --once
+```
+
+**Validation limitations:** Gazebo SDF steering joints, wheel contact, odometry frame alignment, ROS bridge direction and actual runtime motion are not verified. The native node's manual driving mode and reset service are not supported as Gazebo controls. The SDF model starts at (0,0) while the default ring mission starts at a different position; until the world model is spawned at the scenario initial pose, this is **not a valid ring tracking benchmark**. Use this path for integration smoke tests only, not controller comparisons.

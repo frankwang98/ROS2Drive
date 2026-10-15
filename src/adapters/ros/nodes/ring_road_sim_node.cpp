@@ -197,6 +197,13 @@ class RingRoadSimNode : public rclcpp::Node {
     robot_id_ = declare_parameter<std::string>("robot_id", "car01");
     world_frame_ = declare_parameter<std::string>("world_frame", "world");
     base_frame_ = declare_parameter<std::string>("base_frame", "car_base_link");
+    const std::string physics_backend = declare_parameter<std::string>("physics_backend", "native");
+    if (physics_backend != "native" && physics_backend != "gazebo")
+      throw std::invalid_argument("physics_backend must be native or gazebo");
+    gazebo_backend_ = physics_backend == "gazebo";
+    gazebo_odom_timeout_s_ = declare_parameter<double>("gazebo_odom_timeout_s", 0.5);
+    if (!std::isfinite(gazebo_odom_timeout_s_) || gazebo_odom_timeout_s_ <= 0.0)
+      throw std::invalid_argument("gazebo_odom_timeout_s must be finite and positive");
     const double update_rate_hz = declare_parameter<double>("update_rate_hz", 20.0);
     const double lidar_rate_hz = declare_parameter<double>("lidar_rate_hz", 10.0);
     fixed_ring_obstacles_ = declare_parameter<bool>("simulation.fixed_ring_obstacles", true);
@@ -423,6 +430,29 @@ class RingRoadSimNode : public rclcpp::Node {
     obstacle_pub2_ = create_publisher<std_msgs::msg::Float64>("sdc/obstacle_count", live_qos);
     mode_pub_ = create_publisher<std_msgs::msg::Int32>("sdc/mode", live_qos);
     odometry_pub_ = create_publisher<nav_msgs::msg::Odometry>("sdc/odometry", sensor_qos);
+    if (gazebo_backend_) {
+      gazebo_odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
+          "/gazebo/odometry", sensor_qos, [this](nav_msgs::msg::Odometry::ConstSharedPtr msg) {
+            const auto& p = msg->pose.pose.position;
+            const auto& q = msg->pose.pose.orientation;
+            if (!std::isfinite(p.x) || !std::isfinite(p.y) ||
+                !std::isfinite(q.x) || !std::isfinite(q.y) ||
+                !std::isfinite(q.z) || !std::isfinite(q.w) ||
+                !std::isfinite(msg->twist.twist.linear.x))
+              return;
+            const double norm = std::hypot(std::hypot(q.x, q.y), std::hypot(q.z, q.w));
+            if (norm < 1e-6) return;
+            const double x = q.x / norm, y = q.y / norm, z = q.z / norm, w = q.w / norm;
+            gazebo_state_.pose.x = p.x;
+            gazebo_state_.pose.y = p.y;
+            gazebo_state_.pose.yaw = std::atan2(2.0 * (w*z + x*y), 1.0 - 2.0 * (y*y + z*z));
+            gazebo_state_.velocity.linear = msg->twist.twist.linear.x;
+            gazebo_state_.velocity.angular = msg->twist.twist.angular.z;
+            gazebo_state_.localized = true;
+            gazebo_last_odom_ = std::chrono::steady_clock::now();
+            gazebo_odom_received_ = true;
+          });
+    }
     runtime_state_pub_ = create_publisher<std_msgs::msg::Int32>("sdc/runtime_state", live_qos);
     fault_count_pub_ = create_publisher<std_msgs::msg::Int32>("sdc/fault_count", live_qos);
     mission_stage_pub_ = create_publisher<std_msgs::msg::String>("sdc/mission_stage", status_qos);
@@ -526,6 +556,8 @@ class RingRoadSimNode : public rclcpp::Node {
 
     // 读取启动参数 initial_mode（0=自动 1=手动）
     int initial_mode = declare_parameter<int>("initial_mode", 0);
+    if (gazebo_backend_ && initial_mode == 1)
+      throw std::invalid_argument("Gazebo backend does not support native manual driving");
     set_mode(initial_mode == 1 ? Mode::kManual : Mode::kAuto);
 
     timer_ = create_wall_timer(std::chrono::duration<double>(sim_dt_),
@@ -670,7 +702,23 @@ class RingRoadSimNode : public rclcpp::Node {
     const auto loop_started = std::chrono::steady_clock::now();
     if (ring_planner_)
       ring_planner_->setTargetD(get_parameter("ring.target_d").as_double());
-    if (driving_ && !paused_) {
+    const bool gazebo_fresh = gazebo_odom_received_ &&
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - gazebo_last_odom_).count()
+            <= gazebo_odom_timeout_s_;
+    if (gazebo_backend_ && !gazebo_fresh) {
+      // Fail closed: no planning from stale measurements; stop the Gazebo actuator.
+      self_driving_car_demo::msg::ControlCommand stop;
+      stop.emergency_stop = true;
+      control_command_pub_->publish(stop);
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                           "Gazebo odometry missing or stale; stopping actuator");
+    }
+    if (gazebo_backend_ && gazebo_fresh) {
+      // Synchronize visualization-only native model with Gazebo state.
+      // stepExternal never integrates this model.
+      simulation_.syncExternalVisualization(gazebo_state_);
+    }
+    if (driving_ && !paused_ && (!gazebo_backend_ || gazebo_fresh)) {
       // 动态随机障碍物
       if (scenario_definition_.id == "ring_demo" && !fixed_ring_obstacles_) {
         dynamic_obstacle_update_accum_ += sim_dt_;
@@ -721,7 +769,9 @@ class RingRoadSimNode : public rclcpp::Node {
                 {"dynamic-" + std::to_string(obstacle_id++), {ob.x, ob.y, 0.0}, ob.radius, true});
         }
         simulation_.setObstacles(std::move(runtime_obstacles));
-        const auto output = simulation_.step(sim_dt_);
+        const auto output = gazebo_backend_
+            ? simulation_.stepExternal(gazebo_state_, sim_dt_)
+            : simulation_.step(sim_dt_);
         if (auto_recover_safety_ && simulation_.runtime().safetyRecoveryReady())
           simulation_.acknowledgeSafetyRecovery();
         last_planning_success_ = output.planning.success;
@@ -1268,6 +1318,12 @@ class RingRoadSimNode : public rclcpp::Node {
   std::string last_planning_reason_{"not_run"};
   bool paused_{false};
   bool driving_{true};
+  bool gazebo_backend_{false};
+  bool gazebo_odom_received_{false};
+  double gazebo_odom_timeout_s_{0.5};
+  domain::VehicleState gazebo_state_;
+  std::chrono::steady_clock::time_point gazebo_last_odom_{};
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr gazebo_odom_sub_;
   bool fixed_ring_obstacles_{true};
   bool auto_recover_safety_{true};
   double dynamic_obstacle_update_accum_{0.0};

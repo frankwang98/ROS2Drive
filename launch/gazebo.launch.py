@@ -40,6 +40,7 @@ def generate_launch_description():
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(str(pkg / "launch" / "ring_road.launch.py")),
             condition=IfCondition(LaunchConfiguration("run_native")),
-            launch_arguments={"use_rviz": LaunchConfiguration("use_rviz")}.items(),
+            launch_arguments={"use_rviz": LaunchConfiguration("use_rviz"),
+                              "physics_backend": "gazebo"}.items(),
         ),
     ])
