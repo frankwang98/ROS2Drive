@@ -50,3 +50,17 @@ python3 -m unittest discover -s benchmark -p 'test_*.py'
 ```
 
 Record scenario, git SHA, controller, update rate, host CPU and simulation seed alongside results when comparing runs. Avoid committing generated results by default.
+
+## Experimental Ackermann command forwarding
+
+The optional Gazebo scene now contains a minimal four-wheel Ackermann model. Requires compatible `ros_gz_sim` and `ros_gz_bridge`:
+
+```bash
+colcon build --packages-select self_driving_car_demo
+source install/setup.bash
+ros2 launch self_driving_car_demo gazebo.launch.py run_native:=true bridge_commands:=true
+```
+
+The ROS command path is `control/command` → Python adapter → `/model/ackermann_car/cmd_vel` → `ros_gz_bridge` → Gazebo AckermannSteering plugin. The adapter maps steering angle and speed to Twist yaw rate with `omega = v*tan(delta)/2.0`, caps inputs, and commands zero on e-stop, braking, invalid values, or stale commands (>0.3 s).
+
+**This is not closed-loop Gazebo simulation.** The native runtime still uses its own physics and odometry. Gazebo wheel contacts, plugin compatibility, and vehicle movement have not been tested in a real ROS/Gazebo environment. Do not interpret this as validated tracking or benchmark data. Next: bridge Gazebo odometry, make the Gazebo state authoritative, and test TF and stop behavior.

@@ -245,4 +245,6 @@ install(DIRECTORY launch rviz config docs gazebo
   DESTINATION share/${PROJECT_NAME}
 )
 
+install(PROGRAMS scripts/gazebo_command_bridge.py DESTINATION lib/${PROJECT_NAME})
+
 ament_package()
