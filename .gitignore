@@ -21,3 +21,6 @@ demo_car
 # ROS2
 install/
 log/
+
+# Benchmark outputs
+benchmark/results/

@@ -308,3 +308,9 @@ ros2 launch self_driving_car_demo autonomy.launch.py \
 ```
 
 Lattice/EM 的候选结果会转换为统一 `Trajectory<Waypoint>` 后再交给控制器。
+
+## 可选 Gazebo 与 Benchmark（实验阶段）
+
+新增可选 Gazebo Sim 场景启动入口和 ROS 运行指标采集工具，**不改变现有默认仿真**。当前 Gazebo 仅启动独立场景，尚未与车辆动力学闭环耦合；Benchmark 仅采集运行耗时、故障采样及里程，不代表算法精度评测。
+
+完整使用方法与后续集成计划：[Gazebo & Benchmark](docs/gazebo-benchmark.md)。

@@ -241,7 +241,7 @@ install(TARGETS
 # Preserve resource directory names. A trailing slash here would flatten all
 # files into share/${PROJECT_NAME}, while launch resolves config/... and
 # rviz/... beneath the package share directory.
-install(DIRECTORY launch rviz config docs
+install(DIRECTORY launch rviz config docs gazebo
   DESTINATION share/${PROJECT_NAME}
 )
 
