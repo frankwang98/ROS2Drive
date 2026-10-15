@@ -12,9 +12,11 @@ def generate_launch_description():
     pkg = Path(get_package_share_directory("self_driving_car_demo"))
     gz = Path(get_package_share_directory("ros_gz_sim"))
     world = pkg / "gazebo" / "worlds" / "ackermann.sdf"
+    if not world.is_file():
+        raise RuntimeError(f"Missing Gazebo world: {world}")
     return LaunchDescription([
-        DeclareLaunchArgument("run_native", default_value="false"),
-        DeclareLaunchArgument("bridge_commands", default_value="false"),
+        DeclareLaunchArgument("run_native", default_value="true"),
+        DeclareLaunchArgument("bridge_commands", default_value="true"),
         DeclareLaunchArgument("use_rviz", default_value="false"),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(str(gz / "launch" / "gz_sim.launch.py")),
