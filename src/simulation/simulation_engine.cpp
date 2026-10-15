@@ -35,6 +35,22 @@ runtime::RuntimeOutput SimulationEngine::step(double dt_s) {
   return output;
 }
 
+runtime::RuntimeOutput SimulationEngine::stepExternal(
+    const domain::VehicleState& measured, double dt_s) {
+  simulation_time_s_ += dt_s;
+  domain::VehicleState state = measured;
+  state.stamp_s = simulation_time_s_ + 1.0;
+  state.localized = measured.localized && fault_injection_.localization_available;
+  runtime_.updateVehicleState(state);
+  if (fault_injection_.perception_available)
+    runtime_.updateObstacles(obstacles_, state.stamp_s);
+  auto output = runtime_.step(state.stamp_s, dt_s);
+  if (recording_enabled_)
+    recorder_.record({state.stamp_s, state, obstacles_, output});
+  // Deliberately DO NOT call vehicle_.apply(): Gazebo owns the physical state.
+  return output;
+}
+
 void SimulationEngine::manualStep(double throttle, double steering, double dt_s) {
   simulation_time_s_ += dt_s;
   vehicle_.applyManual(throttle, steering, dt_s);

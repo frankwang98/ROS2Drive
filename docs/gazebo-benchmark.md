@@ -82,3 +82,9 @@ python3 benchmark/collect_metrics.py --duration 60 --odometry-topic /gazebo/odom
 ```
 
 The benchmark still requires `/runtime/metrics` from the native runtime. This captures Gazebo displacement but **does not close the feedback loop** or establish ground-truth tracking error. Gazebo odometry must be connected to a dedicated external-state runtime adapter, with internal dynamics disabled, before closed-loop claims are valid. This bridge has not been runtime-tested.
+
+## External physics runtime API (next integration seam)
+
+`SimulationEngine::stepExternal(measured, dt_s)` now accepts a measured `domain::VehicleState` and executes planning/control without applying the resulting command to the native `SimulatedVehicle`. This keeps physics authority with the external simulator. The existing `step(dt_s)` behavior is unchanged.
+
+A core unit test checks that external stepping does not integrate the native vehicle. **The ROS node does not yet select this path**: it still calls `step()`, so this is an API preparation, not a completed Gazebo feedback loop. Next, implement a runtime backend selector, Gazebo odometry subscription, state freshness checks, and ensure all visualization and safety logic use the same measured state.

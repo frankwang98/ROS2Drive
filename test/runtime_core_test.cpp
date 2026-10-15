@@ -419,3 +419,20 @@ TEST(SimulationEngine, RunsNormalNonClosedMissionClosedLoop) {
   EXPECT_GT(simulation.vehicle().speed(), 0.0);
 }
 }  // namespace
+
+
+TEST(SimulationEngine, ExternalStateDoesNotIntegrateNativeVehicle) {
+  sdc::simulation::SimulationEngine engine(
+      std::make_unique<sdc::planning::ReferencePathPlanner>());
+  engine.reset(0.0, 0.0, 0.0);
+  sdc::domain::VehicleState measured;
+  measured.pose.x = 12.0;
+  measured.pose.y = -4.0;
+  measured.pose.yaw = 0.3;
+  measured.velocity.linear = 1.2;
+  measured.localized = true;
+  engine.stepExternal(measured, 0.05);
+  EXPECT_NEAR(engine.vehicle().x(), 0.0, 1e-9);
+  EXPECT_NEAR(engine.vehicle().y(), 0.0, 1e-9);
+  EXPECT_NEAR(engine.simulationTime(), 0.05, 1e-9);
+}

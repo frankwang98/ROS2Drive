@@ -22,6 +22,8 @@ class SimulationEngine {
   bool setMission(domain::Mission mission, bool preempt = true);
   void setObstacles(std::vector<domain::Obstacle> obstacles);
   runtime::RuntimeOutput step(double dt_s);
+  // External physics backend: plan/control using measured state without integrating native dynamics.
+  runtime::RuntimeOutput stepExternal(const domain::VehicleState& measured, double dt_s);
   void manualStep(double throttle, double steering, double dt_s);
   void reset(double x, double y, double yaw);
   bool pause();
