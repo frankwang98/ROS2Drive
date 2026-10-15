@@ -39,7 +39,7 @@ python3 benchmark/collect_metrics.py --duration 60 --output benchmark/results/ri
 python3 benchmark/collect_metrics.py --namespace car01 --duration 60
 ```
 
-The collector subscribes to `/runtime/metrics` and `/odom` (prefix both with `--namespace` when needed). Confirm actual topic names with `ros2 topic list` before capture. It writes JSON with loop mean / p95 / max, fault sample count, path-point mean and traveled odometry distance. It exits nonzero when no runtime metrics are received.
+The collector subscribes to `/runtime/metrics` and `/sdc/odometry` (prefix both with `--namespace` when needed). Confirm actual topic names with `ros2 topic list` before capture. It writes JSON with loop mean / p95 / max, fault sample count, path-point mean and traveled odometry distance. It exits nonzero when no runtime metrics are received.
 
 **This is not yet an algorithm comparison.** It does not report lateral tracking error, obstacle collision rate, or mission success. Such metrics need ground truth and repeatable scenario seeds. Do not claim controller performance based on loop duration alone.
 
