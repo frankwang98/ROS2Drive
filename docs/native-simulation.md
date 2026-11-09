@@ -23,3 +23,6 @@ not an automatically validated mission success report.
 This CMake entry point is intentionally separate from the ROS ament entry point
 to preserve existing colcon builds. On Apple Silicon install CMake and Ninja
 (e.g. `brew install cmake ninja`). 
+
+CTest writes smoke-test recordings into the configured build directory; the
+CLI default output is `recording.json` in the current working directory.

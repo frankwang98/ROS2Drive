@@ -35,7 +35,7 @@ static void route(std::ostream& out, const std::vector<Pose2D>& points) {
 }
 int main(int argc, char** argv) {
   try {
-    std::string id="port_transport", output="studio/recording.json", route_file="";
+    std::string id="port_transport", output="recording.json";
     int steps=800;
     double dt=0.05;
     for(int i=1;i<argc;++i) {
