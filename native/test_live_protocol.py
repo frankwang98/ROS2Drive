@@ -26,7 +26,6 @@ with subprocess.Popen(
     assert estop == {"kind": "ack", "accepted": True}
     stopped = request("STEP")
     assert stopped["runtime_state"] == "ESTOP"
-    request("QUIT") if False else None
     proc.stdin.write("QUIT\n")
     proc.stdin.flush()
     assert proc.wait(timeout=5) == 0
