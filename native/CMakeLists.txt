@@ -31,3 +31,9 @@ add_test(NAME native_port_smoke COMMAND ros2drive_sim --scenario port_transport 
 add_test(NAME native_ring_smoke COMMAND ros2drive_sim --scenario ring_demo --steps 10 --output "${CMAKE_CURRENT_BINARY_DIR}/ring-smoke.json")
 add_test(NAME native_mining_smoke COMMAND ros2drive_sim --scenario mining_haul --steps 10 --output "${CMAKE_CURRENT_BINARY_DIR}/mining-smoke.json")
 add_test(NAME native_agriculture_smoke COMMAND ros2drive_sim --scenario agriculture_route --steps 10 --output "${CMAKE_CURRENT_BINARY_DIR}/agriculture-smoke.json")
+
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+  add_test(NAME native_live_protocol
+    COMMAND "${Python3_EXECUTABLE}" "${SDC_ROOT}/native/test_live_protocol.py" "$<TARGET_FILE:ros2drive_live>")
+endif()
