@@ -20,7 +20,7 @@ function allPoints(){return [...(data?.route||[]),...(data?.lanes||[]).flatMap(l
 function computeBounds(){
  const p=allPoints().filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.y));
  if(!p.length)return {cx:0,cy:0,span:70};
- let minX=Math.min(...p.map(v=>v.x)),maxX=Math.max(...p.map(v=>v.x)),minY=Math.min(...p.map(v=>v.y)),maxY=Math.max(...p.map(v=>v.y));
+ let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;for(const v of p){minX=Math.min(minX,v.x);maxX=Math.max(maxX,v.x);minY=Math.min(minY,v.y);maxY=Math.max(maxY,v.y);}
  return {cx:(minX+maxX)/2,cy:(minY+maxY)/2,span:Math.max(maxX-minX,maxY-minY,15)*1.2};
 }
 function transform(){const w=canvas.clientWidth,h=canvas.clientHeight,b=bounds||{cx:0,cy:0,span:70};const s=Math.min(w,h)/b.span;return {s,to:p=>({x:w/2+(p.x-b.cx)*s,y:h/2-(p.y-b.cy)*s}),from:(x,y)=>({x:(x-w/2)/s+b.cx,y:(h/2-y)/s+b.cy})};}
@@ -32,10 +32,10 @@ function render(){
  const dpr=window.devicePixelRatio||1,w=canvas.clientWidth,h=canvas.clientHeight;
  if(!w||!h)return;
  canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
- const t=transform();
+ const t=transform(),b=bounds||{cx:0,cy:0,span:70};
  ctx.strokeStyle='#213743';ctx.lineWidth=1;
- for(let x=(w/2+(-bounds.cx*t.s))% (10*t.s);x<w;x+=10*t.s){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();}
- for(let y=(h/2+(bounds.cy*t.s))%(10*t.s);y<h;y+=10*t.s){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();}
+ for(let x=((w/2-b.cx*t.s)%(10*t.s)+10*t.s)%(10*t.s);x<w;x+=10*t.s){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();}
+ for(let y=((h/2+b.cy*t.s)%(10*t.s)+10*t.s)%(10*t.s);y<h;y+=10*t.s){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();}
  if(data){
  if($('lanes').checked)for(const lane of data.lanes)path(lane.points,'#385461',9);
  if($('route').checked)path(data.route,'#62d99c',2);

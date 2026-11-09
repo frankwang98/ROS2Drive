@@ -1,0 +1,25 @@
+name: native-cpp
+on:
+  push:
+  pull_request:
+jobs:
+  build-native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S native -B build-native -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build-native --parallel 2
+      - name: Smoke tests
+        run: ctest --test-dir build-native --output-on-failure
+      - name: Export sample recording
+        run: ./build-native/ros2drive_sim --scenario port_transport --steps 100 --output studio/recording.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: studio-recording-${{ matrix.os }}
+          path: studio/recording.json

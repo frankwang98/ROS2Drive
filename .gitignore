@@ -24,3 +24,7 @@ log/
 
 # Benchmark outputs
 benchmark/results/
+
+# Native build and generated Studio recordings
+/build-native/
+/studio/recording.json

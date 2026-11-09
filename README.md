@@ -7,6 +7,47 @@
 详细资料：[架构与时序](docs/architecture.md) · [ROS 接口契约](docs/interfaces.md) ·
 [场景与故障注入](docs/scenarios.md) · [实施路线](TODO.md)
 
+## ROS2Drive Studio · macOS / Ubuntu
+
+> New experimental native runner and browser viewer. The macOS and Ubuntu builds have not yet been verified in CI; see [Native setup](docs/native-simulation.md).
+
+[Open Studio (GitHub Pages when enabled)](https://frankwang98.github.io/ROS2Drive/studio/) · [Studio source](studio/) · [Native build guide](docs/native-simulation.md)
+
+```bash
+# From repository root, macOS or Ubuntu (CMake + Ninja + C++17)
+cmake -S native -B build-native -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build-native -j
+ctest --test-dir build-native --output-on-failure
+./build-native/ros2drive_sim --scenario port_transport --output studio/recording.json
+python3 -m http.server 8000
+# http://localhost:8000/studio/
+```
+
+The browser Studio renders recorded output from the **same C++ VehicleRuntime / SimulationEngine** as the ROS build; no duplicate JS planning or physics engine. It currently provides playback, planned trajectory and vehicle visualization, plus **draft waypoint editing/export**. The exported draft is **not yet imported by the native runner**. Live WebSocket, ROS adapter, and editable mission execution remain planned, not implemented.
+
+### Four scenarios
+
+| Ring Demo | Mining Haul |
+|---|---|
+| Circular route, fixed obstacles, closed-loop baseline | Elevation-carrying haul route, staged load/dump mission |
+| Port Transport | Agriculture Route |
+| Yard → quay → return route, staged operations | Six coverage rows and headland turns |
+
+Actual screenshots should be captured from Studio/RViz **after successful execution**. Concept images are intentionally not presented as proof of implementation.
+
+### Platform boundary
+
+```text
+  Browser Studio (studio/) ── recording.json ── Native Runner (native/)
+                                             │
+                                 sdc_runtime_core (C++17)
+                                             │
+                ┌────────────────────────────┴───────────────────┐
+                │                                                │
+         macOS / Ubuntu CMake                           Ubuntu ROS2 / ament
+         (no ROS required)                               (RViz, Topics, Action)
+```
+
 ## 系统边界
 
 ```text
